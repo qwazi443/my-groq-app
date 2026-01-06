@@ -12,12 +12,12 @@ const INSTRUMENT_PRESETS = [
   { id: 'kick', name: 'Kick', icon: Drum, pitch: 'C2', file: 'kick1.wav' },
   { id: 'clap', name: 'Clap', icon: Music, pitch: 'D#2', file: 'clap1.wav' },
   { id: 'snare', name: 'Snare', icon: Speaker, pitch: 'D2', file: 'snare1.wav' },
-  { id: 'hat_open', name: 'Open Hat', icon: Volume2, pitch: 'F#2', file: 'hat_open1.wav' },
-  { id: 'hat_closed', name: 'Closed Hat', icon: Disc, pitch: 'G#2', file: 'hat_closed1.wav' },
-  { id: 'bass', name: 'Bass', icon: Activity, pitch: 'D3', file: 'bass1.wav' }, 
+  { id: 'hat_open', name: 'Open Hat', icon: Cymbal, pitch: 'F#2', file: 'hat_open1.wav' },
+  { id: 'hat_closed', name: 'Closed Hat', icon: Cymbal, pitch: 'G#2', file: 'hat_closed1.wav' },
+  { id: 'bass', name: 'Bass', icon: Bass, pitch: 'D3', file: 'bass1.wav' }, 
   { id: 'lead', name: 'Lead', icon: Zap, pitch: 'C4', file: 'lead1.wav' },
-  { id: 'stabs', name: 'Stabs', icon: Activity, pitch: 'C3', file: 'stabs1.wav' },
-  { id: 'hoover', name: 'Hoover', icon: Disc, pitch: 'F3', file: 'hoover1.wav' },
+  { id: 'stabs', name: 'Stabs', icon: lightning, pitch: 'C3', file: 'stabs1.wav' },
+  { id: 'hoover', name: 'Hoover', icon: Vaccum, pitch: 'F3', file: 'hoover1.wav' },
 ];
 
 const RHYTHM_LIB = {
