@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Download, Wand2, Zap, Disc, Music, Drum, Speaker, Volume2, Activity, AlertCircle, Play, Square, Info, Sliders, HelpCircle, X, Dice5 } from 'lucide-react';
+import { Download, Wand2, Zap, Disc, Music, Drum, Speaker, Volume2, Activity, AlertCircle, Play, Square, Info, Sliders, HelpCircle, X, Dice5, Volume1, Settings } from 'lucide-react';
 
 // --- CONSTANTS ---
 const KEYS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-const SCALES = ['Minor', 'Phrygian', 'Dorian', 'Major']; 
+const SCALES = ['Minor', 'Phrygian', 'Dorian', 'Major', 'Harmonic Minor']; 
 const PRODUCER_STYLES = ['Tidy Trax', 'Vicious Circle', 'Nukleuz', 'Paul Glazby', 'Andy Farley', 'Lisa Lashes', 'BK', 'Tony De Vit'];
 const DEFAULT_BPM = 150; 
 
@@ -17,7 +17,7 @@ const INSTRUMENT_PRESETS = [
   { id: 'hat_closed', name: '909 Closed', icon: Disc, pitch: 'G#2', file: 'hat_closed1.wav', desc: 'Driving 16th Hats' },
   { id: 'bass', name: 'Donk Bass', icon: Activity, pitch: 'D3', file: 'bass1.wav', desc: 'FM Donk / Offbeat Bass' }, 
   { id: 'lead', name: 'Alpha Hoover', icon: Zap, pitch: 'C4', file: 'lead1.wav', desc: 'Massive Pitch-Ramp Saw' },
-  { id: 'hoover', name: 'Acid Screech', icon: Disc, pitch: 'F3', file: 'hoover1.wav', desc: 'Distorted 303 Square' }, // Renamed for clarity
+  { id: 'hoover', name: 'Acid Screech', icon: Disc, pitch: 'F3', file: 'hoover1.wav', desc: 'Distorted 303 Square' },
 ];
 
 const PROMPT_EXAMPLES = [
@@ -42,7 +42,8 @@ const noteFromScale = (root, scale, degree, octave) => {
     Major: [0, 2, 4, 5, 7, 9, 11],
     Minor: [0, 2, 3, 5, 7, 8, 10], 
     Phrygian: [0, 1, 3, 5, 7, 8, 10], 
-    Dorian: [0, 2, 3, 5, 7, 9, 10],   
+    Dorian: [0, 2, 3, 5, 7, 9, 10], 
+    'Harmonic Minor': [0, 2, 3, 5, 7, 8, 11]  
   }[scale] || [0, 2, 3, 5, 7, 8, 10];
 
   const rootIndex = KEYS.indexOf(root);
@@ -104,7 +105,7 @@ function writeMidiFile(notes) {
   return new Uint8Array(data);
 }
 
-// --- DISTORTION CURVE (The "Grit" Maker) ---
+// --- DISTORTION CURVE ---
 function makeDistortionCurve(amount) {
   const k = typeof amount === 'number' ? amount : 50;
   const n_samples = 44100;
@@ -117,14 +118,13 @@ function makeDistortionCurve(amount) {
   return curve;
 }
 
-// --- UK HARD HOUSE AUDIO ENGINE (V13.0) ---
+// --- UK HARD HOUSE AUDIO ENGINE (V14.0) ---
 class AudioEngine {
   constructor(onStatusUpdate) {
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 0.5;
     
-    // 1. LIMITER / COMPRESSOR (Prevents Clipping)
     this.compressor = this.ctx.createDynamicsCompressor();
     this.compressor.threshold.value = -12;
     this.compressor.knee.value = 30;
@@ -139,8 +139,7 @@ class AudioEngine {
     this.analyser.fftSize = 2048;
     this.masterGain.connect(this.analyser);
 
-    // 2. GLOBAL DISTORTION CURVE (Pre-calculated)
-    this.distCurve = makeDistortionCurve(200); // Amount of grit
+    this.distCurve = makeDistortionCurve(200); 
 
     this.buffers = {};
     this.activeNodes = []; 
@@ -152,14 +151,15 @@ class AudioEngine {
     if (this.ctx.state === 'suspended') {
       await this.ctx.resume();
     }
-    this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
-    this.masterGain.gain.setValueAtTime(0.5, this.ctx.currentTime);
   }
 
   kill() {
     const now = this.ctx.currentTime;
     this.masterGain.gain.cancelScheduledValues(now);
     this.masterGain.gain.setValueAtTime(0, now);
+    // Smooth restoration of volume for next play
+    this.masterGain.gain.linearRampToValueAtTime(0.5, now + 0.1); 
+    
     this.activeNodes.forEach(n => { try{n.stop();}catch(e){} });
     this.activeNodes = [];
   }
@@ -175,7 +175,7 @@ class AudioEngine {
         const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
         this.buffers[inst.id] = audioBuffer;
       } catch (e) {
-        console.warn(`Sample fallback: ${inst.id}`);
+        // Silent fail, will use synth
       }
     });
     await Promise.all(promises);
@@ -183,7 +183,6 @@ class AudioEngine {
   }
 
   playNote(instId, pitch, time, duration, velocity = 100) {
-    // Lead/Hoover/Acid ALWAYS use synth engine (bypass sample)
     if (instId === 'lead' || instId === 'hoover' || instId === 'stabs') {
        this.playSynth(instId, pitch, time, duration, velocity);
        return; 
@@ -194,6 +193,15 @@ class AudioEngine {
     } else {
       this.playSynth(instId, pitch, time, duration, velocity);
     }
+  }
+
+  // Used for UI Previews
+  preview(instId) {
+    this.resume();
+    const now = this.ctx.currentTime;
+    // Default preview pitches
+    const pitch = instId === 'bass' ? 'D3' : instId === 'lead' ? 'C4' : 'C3';
+    this.playNote(instId, pitch, now, '1', 100);
   }
 
   playSample(id, time, velocity) {
@@ -214,8 +222,7 @@ class AudioEngine {
     source.start(time);
     
     this.activeNodes.push(source);
-    // Cleanup old nodes
-    if(this.activeNodes.length > 30) this.activeNodes.shift();
+    if(this.activeNodes.length > 40) this.activeNodes.shift();
   }
 
   playSynth(instId, pitch, time, duration, velocity) {
@@ -223,12 +230,12 @@ class AudioEngine {
     
     if (instId === 'kick') this.synthKick(time, vel);
     else if (instId === 'bass') this.synthDonk(pitch, time, duration, vel); 
-    else if (instId === 'lead') this.synthMassiveHoover(pitch, time, duration, vel); // NEW
-    else if (instId === 'hoover') this.synthAcidScreech(pitch, time, duration, vel); // NEW (Fixes "hat" bug)
+    else if (instId === 'lead') this.synthMassiveHoover(pitch, time, duration, vel); 
+    else if (instId === 'hoover') this.synthAcidScreech(pitch, time, duration, vel); 
     else this.synthHat(time, instId.includes('open'), vel);
   }
 
-  // --- SYNTH MODELS (V13.0 - SONIC WARFARE EDITION) ---
+  // --- SYNTH MODELS ---
 
   synthKick(time, vel) {
     const osc = this.ctx.createOscillator();
@@ -260,72 +267,48 @@ class AudioEngine {
   }
   
   synthMassiveHoover(pitch, time, dur, vel) {
-    // THE "DOMINATOR" HOOVER (5 Oscillators + Pitch Ramp)
     const targetFreq = 440 * Math.pow(2, (noteToMidiNum(pitch) - 69) / 12);
     const attack = 0.15; 
-    
     const createOsc = (detune, pan, type = 'sawtooth', octShift = 0) => {
         const osc = this.ctx.createOscillator();
         osc.type = type;
-        
-        // PITCH ENVELOPE (The Vacuum)
         osc.frequency.setValueAtTime(targetFreq * 0.5, time); 
         osc.frequency.exponentialRampToValueAtTime(targetFreq * (octShift === -1 ? 0.5 : 1), time + attack);
         osc.detune.setValueAtTime(detune, time);
-
-        // FILTER (Bite)
         const filter = this.ctx.createBiquadFilter();
         filter.type = 'lowpass';
         filter.frequency.setValueAtTime(800, time);
         filter.frequency.exponentialRampToValueAtTime(12000, time + attack); 
         filter.Q.value = 1;
-
         const panner = this.ctx.createStereoPanner();
         panner.pan.value = pan;
-
         const g = this.ctx.createGain();
         g.gain.setValueAtTime(vel * 0.25, time); 
         g.gain.linearRampToValueAtTime(0, time + dur); 
-        
         osc.connect(filter).connect(panner).connect(g).connect(this.masterGain);
         osc.start(time); osc.stop(time + dur);
         this.activeNodes.push(osc);
     };
-
-    createOsc(0, 0);     // Center
-    createOsc(-25, -0.6);   // Wide Left
-    createOsc(25, 0.6);    // Wide Right
-    createOsc(-10, -0.3);   // Mid Left
-    createOsc(10, 0.3);    // Mid Right
-    // SUB OSCILLATOR (Weight)
-    createOsc(0, 0, 'square', -1);
+    createOsc(0, 0); createOsc(-25, -0.6); createOsc(25, 0.6); createOsc(-10, -0.3); createOsc(10, 0.3); createOsc(0, 0, 'square', -1);
   }
 
   synthAcidScreech(pitch, time, dur, vel) {
-    // 303 STYLE ACID (Distorted Square + Resonant Filter)
     const freq = 440 * Math.pow(2, (noteToMidiNum(pitch) - 69) / 12);
-    
     const osc = this.ctx.createOscillator();
     osc.type = 'square'; 
     osc.frequency.setValueAtTime(freq, time);
-
-    // DISTORTION (The Grit)
     const shaper = this.ctx.createWaveShaper();
     shaper.curve = this.distCurve;
     shaper.oversample = '4x';
-
-    // FILTER (The Squelch)
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.setValueAtTime(200, time);
-    filter.frequency.exponentialRampToValueAtTime(2500, time + 0.1); // Wah effect
+    filter.frequency.exponentialRampToValueAtTime(2500, time + 0.1); 
     filter.frequency.exponentialRampToValueAtTime(freq, time + dur);
-    filter.Q.value = 15; // HIGH RESONANCE
-
+    filter.Q.value = 15; 
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(vel * 0.5, time);
     g.gain.exponentialRampToValueAtTime(0.01, time + dur);
-    
     osc.connect(filter).connect(shaper).connect(g).connect(this.masterGain);
     osc.start(time); osc.stop(time + dur);
     this.activeNodes.push(osc);
@@ -354,9 +337,9 @@ class AudioEngine {
 const Tooltip = ({ text, children }) => (
   <div className="relative group flex items-center">
     {children}
-    <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 bg-gray-800 text-white text-xs p-2 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 border border-white/20 text-center">
+    <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 bg-gray-900 text-white text-xs p-2 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 border border-white/20 text-center">
       {text}
-      <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-gray-800"></div>
+      <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-gray-900"></div>
     </div>
   </div>
 );
@@ -381,15 +364,16 @@ const Knob = ({ label, value, onChange, options, help }) => (
 
 const HelpModal = ({ onClose }) => (
   <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-    <div className="bg-[#111] border-2 border-[#39FF14] rounded-2xl max-w-lg w-full p-6 relative shadow-[0_0_50px_rgba(57,255,20,0.2)]">
+    <div className="bg-[#111] border-2 border-[#39FF14] rounded-2xl max-w-lg w-full p-6 relative shadow-[0_0_50px_rgba(57,255,20,0.2)] animate-in fade-in zoom-in duration-200">
       <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white" aria-label="Close Modal"><X size={24} /></button>
       <h2 id="modal-title" className="text-2xl font-black text-[#39FF14] mb-4 uppercase">User Guide</h2>
       <div className="space-y-4 text-gray-300 text-sm">
-        <p><strong className="text-white">1. Choose Sounds:</strong> Select instrument pads below. Unselected pads won't play. If NONE are selected, the AI picks a random kit.</p>
-        <p><strong className="text-white">2. Pattern Engine:</strong> Uses algorithmic generation to create "Offbeat Bass" (Donk) and "Acid Rolls" automatically. No AI API required.</p>
-        <p><strong className="text-white">3. Randomize:</strong> Click the dice icon to generate a fresh style/prompt idea.</p>
-        <p><strong className="text-white">4. Export:</strong> "Extract MIDI" gives you a file compatible with Ableton, FL Studio, or Logic.</p>
+        <p><strong className="text-white">1. Select Instruments:</strong> Use the matrix below. Toggle sounds on/off. Click the tiny <Play size={10} className="inline"/> button to preview.</p>
+        <p><strong className="text-white">2. Set Density:</strong> Use the Density slider to control how busy the pattern is (Minimal vs. Chaotic).</p>
+        <p><strong className="text-white">3. Generate:</strong> Click "GENERATE DROP" to create a unique, algorithmic pattern.</p>
+        <p><strong className="text-white">4. Export:</strong> "Extract MIDI" creates a multi-channel MIDI file for your DAW.</p>
       </div>
+      <button onClick={onClose} className="w-full mt-6 bg-[#39FF14] text-black font-bold py-3 rounded hover:opacity-90">GOT IT</button>
     </div>
   </div>
 );
@@ -400,6 +384,7 @@ export default function HardHouseGenerator() {
   const [selectedKey, setSelectedKey] = useState('F');
   const [selectedScale, setSelectedScale] = useState('Minor');
   const [selectedStyle, setSelectedStyle] = useState('Tidy Trax');
+  const [density, setDensity] = useState(0.7);
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -407,7 +392,7 @@ export default function HardHouseGenerator() {
   const [selectedInstruments, setSelectedInstruments] = useState(['kick', 'hat_open', 'bass', 'lead']);
   const [errorMsg, setErrorMsg] = useState('');
   const [audioStatus, setAudioStatus] = useState('Init...');
-  const [showHelp, setShowHelp] = useState(false);
+  const [showHelp, setShowHelp] = useState(true); // Show on first load
 
   const isPlayingRef = useRef(false);
   const canvasRef = useRef(null);
@@ -451,7 +436,7 @@ export default function HardHouseGenerator() {
     else {
         ctx.fillStyle = '#050505';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.strokeStyle = '#333';
+        ctx.strokeStyle = '#222';
         ctx.beginPath();
         ctx.moveTo(0, canvas.height/2);
         ctx.lineTo(canvas.width, canvas.height/2);
@@ -491,15 +476,23 @@ export default function HardHouseGenerator() {
         notes.push({ instId: 'kick', pitch: 'C2', duration: '1', velocity: 127, startTick: step * 128 });
       }
       
-      // 2. BASS (Off Beat - The Donk)
-      if (instrumentsToUse.includes('bass') && [2, 6, 10, 14].includes(step)) {
-         notes.push({ instId: 'bass', pitch: noteFromScale(selectedKey, selectedScale, 0, 2), duration: '2', velocity: getVel(115), startTick: step * 128 });
+      // 2. BASS (Off Beat + Gallop Logic)
+      if (instrumentsToUse.includes('bass')) {
+         // Standard Donk (2, 6, 10, 14)
+         if ([2, 6, 10, 14].includes(step)) {
+            notes.push({ instId: 'bass', pitch: noteFromScale(selectedKey, selectedScale, 0, 2), duration: '2', velocity: getVel(115), startTick: step * 128 });
+         }
+         // Reverse Bass / Gallop (add extra note before kick if density is high)
+         if (density > 0.6 && [3, 7, 11, 15].includes(step)) {
+             notes.push({ instId: 'bass', pitch: noteFromScale(selectedKey, selectedScale, 0, 2), duration: '1', velocity: getVel(90), startTick: step * 128 });
+         }
       }
 
-      // 3. LEAD (Super Hoover)
+      // 3. LEAD (Acid Rolls + Complexity)
       if (instrumentsToUse.includes('lead')) {
-        const chance = [0, 4, 8, 12].includes(step) ? 0.2 : 0.8;
-        if (Math.random() < chance) {
+        // Higher density = more chance of notes
+        const baseChance = [0, 4, 8, 12].includes(step) ? 0.3 : 0.8; 
+        if (Math.random() < baseChance * density) {
             const octaveJump = Math.random() > 0.7 ? 1 : 0;
             const degree = [0, 2, 3, 5, 7][Math.floor(Math.random() * 5)];
             notes.push({ 
@@ -512,9 +505,9 @@ export default function HardHouseGenerator() {
         }
       }
 
-      // 4. ACID SCREECH (Hoover/Acid instrument)
+      // 4. ACID SCREECH (Sparse Accents)
       if (instrumentsToUse.includes('hoover')) {
-         if (Math.random() < 0.3) {
+         if (Math.random() < 0.2 * density) {
              const degree = [0, 5, 7][Math.floor(Math.random() * 3)];
              notes.push({ 
                  instId: 'hoover', 
@@ -526,12 +519,16 @@ export default function HardHouseGenerator() {
          }
       }
 
-      // 5. HATS
+      // 5. HATS & PERCUSSION
       if (instrumentsToUse.includes('hat_open') && step % 4 === 2) {
         notes.push({ instId: 'hat_open', pitch: 'F#2', duration: '2', velocity: getVel(100), startTick: step * 128 });
       }
       if (instrumentsToUse.includes('hat_closed') && step % 2 === 0 && step % 4 !== 2) {
          notes.push({ instId: 'hat_closed', pitch: 'G#2', duration: '1', velocity: getVel(70), startTick: step * 128 });
+      }
+      if (instrumentsToUse.includes('snare') && density > 0.8 && step % 16 >= 12) {
+         // Snare roll at end of bar
+         notes.push({ instId: 'snare', pitch: 'D2', duration: '1', velocity: getVel(80) + (step%4)*10, startTick: step * 128 });
       }
     }
     return notes;
@@ -562,9 +559,12 @@ export default function HardHouseGenerator() {
     }, 600);
   };
 
-  const handleRandomizePrompt = () => {
-    setPrompt(PROMPT_EXAMPLES[Math.floor(Math.random() * PROMPT_EXAMPLES.length)]);
+  const handlePreview = (instId, e) => {
+    e.stopPropagation();
+    if (window.HARDHOUSE_AUDIO) window.HARDHOUSE_AUDIO.preview(instId);
   };
+
+  const handleRandomizePrompt = () => setPrompt(PROMPT_EXAMPLES[Math.floor(Math.random() * PROMPT_EXAMPLES.length)]);
 
   const handleDownloadMidi = () => {
     if (currentPattern.length === 0) return;
@@ -600,7 +600,7 @@ export default function HardHouseGenerator() {
               <div className={`h-2 w-2 rounded-full ${audioStatus === 'Ready' ? 'bg-[#39FF14]' : 'bg-red-500 animate-pulse'}`} />
               <span>System: {audioStatus}</span>
               <span className="text-gray-500">|</span>
-              <span>v13.0 Sonic Warfare</span>
+              <span>v14.0 Producer Edition</span>
             </div>
           </div>
           <button 
@@ -608,30 +608,47 @@ export default function HardHouseGenerator() {
             className="flex items-center gap-2 bg-[#222] hover:bg-[#333] px-4 py-2 rounded-full border border-white/20 text-gray-200 text-sm font-bold transition-all hover:scale-105"
             aria-label="Open Help"
           >
-            <HelpCircle size={16} /> How It Works
+            <HelpCircle size={16} /> Guide
           </button>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <section className="lg:col-span-4 space-y-6" aria-label="Controls">
+            {/* PRODUCER CONTROLS */}
             <div className="bg-[#0A0A0A] border border-white/10 rounded-xl p-6 relative overflow-hidden">
               <div className="absolute top-0 left-0 w-1 h-full bg-[#39FF14]" />
               <div className="flex items-center gap-2 mb-6 text-gray-400 text-xs font-black uppercase tracking-widest">
                 <Sliders size={14} /> Producer Controls
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <Knob label="Key" value={selectedKey} onChange={(e) => setSelectedKey(e.target.value)} options={KEYS} />
-                <Knob label="Scale" value={selectedScale} onChange={(e) => setSelectedScale(e.target.value)} options={SCALES} />
-                <Knob label="BPM" value={bpm} onChange={(e) => setBpm(Number(e.target.value))} options={[140, 145, 150, 155, 160, 170]} />
-                <Knob label="Style" value={selectedStyle} onChange={(e) => setSelectedStyle(e.target.value)} options={PRODUCER_STYLES} help="Affects rhythm randomization weights" />
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <Knob label="Key" value={selectedKey} onChange={(e) => setSelectedKey(e.target.value)} options={KEYS} />
+                  <Knob label="Scale" value={selectedScale} onChange={(e) => setSelectedScale(e.target.value)} options={SCALES} />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                   <Knob label="BPM" value={bpm} onChange={(e) => setBpm(Number(e.target.value))} options={[140, 145, 150, 155, 160, 170]} />
+                   <Knob label="Style" value={selectedStyle} onChange={(e) => setSelectedStyle(e.target.value)} options={PRODUCER_STYLES} />
+                </div>
+                <div className="pt-2">
+                    <div className="flex justify-between text-[10px] font-bold text-[#39FF14] uppercase mb-1">
+                        <span>Pattern Density</span>
+                        <span>{Math.round(density * 100)}%</span>
+                    </div>
+                    <input 
+                        type="range" min="0.2" max="1.2" step="0.1" 
+                        value={density} onChange={(e) => setDensity(Number(e.target.value))}
+                        className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-[#39FF14]"
+                    />
+                </div>
               </div>
             </div>
 
+            {/* PROMPT */}
             <div className="bg-[#0A0A0A] border border-white/10 rounded-xl p-6 relative">
               <div className="absolute top-0 left-0 w-1 h-full bg-[#FF00FF]" />
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-2 text-gray-400 text-xs font-black uppercase tracking-widest">
-                  <Wand2 size={14} /> Pattern Prompt
+                  <Wand2 size={14} /> AI Context
                 </div>
                 <button onClick={handleRandomizePrompt} className="text-gray-500 hover:text-[#FF00FF] transition-colors" aria-label="Randomize Prompt"><Dice5 size={16} /></button>
               </div>
@@ -641,19 +658,24 @@ export default function HardHouseGenerator() {
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder="Ex: Dark Acid Techno drop..."
-                className="w-full bg-black/50 border border-white/20 rounded-lg p-4 text-gray-200 placeholder:text-gray-600 focus:border-[#FF00FF] focus:ring-1 focus:ring-[#FF00FF] outline-none transition-all h-32 resize-none text-sm font-mono"
+                className="w-full bg-black/50 border border-white/20 rounded-lg p-4 text-gray-200 placeholder:text-gray-600 focus:border-[#FF00FF] focus:ring-1 focus:ring-[#FF00FF] outline-none transition-all h-24 resize-none text-sm font-mono"
               />
             </div>
           </section>
 
           <section className="lg:col-span-8 space-y-6" aria-label="Visualizer and Actions">
-            <div className="bg-black border-2 border-white/10 rounded-2xl p-1 h-48 relative shadow-inner shadow-black">
-              <canvas ref={canvasRef} width={800} height={200} className="w-full h-full rounded-xl opacity-90" aria-label="Audio Visualizer" role="img" />
+            {/* VISUALIZER */}
+            <div className="bg-black border-2 border-white/10 rounded-2xl p-1 h-64 relative shadow-inner shadow-black">
+              <canvas ref={canvasRef} width={800} height={256} className="w-full h-full rounded-xl opacity-90" aria-label="Audio Visualizer" role="img" />
               {!isPlaying && (
-                <div className="absolute inset-0 flex items-center justify-center text-gray-700 text-4xl font-black uppercase tracking-widest pointer-events-none select-none">Standby</div>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none">
+                   <div className="text-gray-800 text-6xl font-black uppercase tracking-widest mb-2">READY</div>
+                   <div className="text-gray-600 text-sm font-mono">Audio Engine Standby</div>
+                </div>
               )}
             </div>
 
+            {/* ACTION BAR */}
             <div className="flex flex-col md:flex-row gap-4">
               <button
                 onClick={handleLaunch}
@@ -682,30 +704,44 @@ export default function HardHouseGenerator() {
           </section>
         </div>
 
+        {/* INSTRUMENT MATRIX */}
         <section aria-label="Instrument Selection">
-          <div className="flex items-center gap-2 mb-4 text-gray-400 text-xs font-black uppercase tracking-widest border-b border-white/10 pb-2">
-            <Music size={14} /> Instrument Matrix
+          <div className="flex items-center justify-between mb-4 border-b border-white/10 pb-2">
+             <div className="flex items-center gap-2 text-gray-400 text-xs font-black uppercase tracking-widest">
+                <Music size={14} /> Instrument Matrix
+             </div>
+             <div className="text-[10px] text-gray-500 uppercase tracking-wider">Click Play to Preview • Click Card to Toggle</div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-3">
             {INSTRUMENT_PRESETS.map((inst) => (
               <button
                 key={inst.id}
                 onClick={() => toggleInstrument(inst.id)}
-                className={`p-4 rounded-lg border flex flex-col items-center gap-2 transition-all relative overflow-hidden group ${
+                className={`p-3 pt-8 pb-4 rounded-lg border flex flex-col items-center gap-2 transition-all relative overflow-hidden group ${
                   selectedInstruments.includes(inst.id) 
-                  ? 'border-[#39FF14] bg-[#39FF14]/10 text-[#39FF14]' 
+                  ? 'border-[#39FF14] bg-[#39FF14]/10 text-[#39FF14] shadow-[0_0_10px_rgba(57,255,20,0.1)]' 
                   : 'border-white/10 bg-white/5 text-gray-500 hover:border-white/30'
                 }`}
                 title={inst.desc}
                 aria-pressed={selectedInstruments.includes(inst.id)}
               >
-                <inst.icon size={20} aria-hidden="true" />
+                {/* PREVIEW BUTTON */}
+                <div 
+                    onClick={(e) => handlePreview(inst.id, e)}
+                    className="absolute top-2 right-2 p-1 bg-black/50 hover:bg-white text-white hover:text-black rounded-full transition-colors z-10"
+                    title="Preview Sound"
+                >
+                    <Volume1 size={12} />
+                </div>
+
+                <inst.icon size={24} aria-hidden="true" className={isPlaying && currentPattern.some(n => n.instId === inst.id) ? 'animate-bounce' : ''} />
                 <span className="text-[10px] font-bold uppercase tracking-widest">{inst.name}</span>
                 {selectedInstruments.includes(inst.id) && <div className="absolute bottom-0 left-0 w-full h-1 bg-[#39FF14]" />}
               </button>
             ))}
           </div>
         </section>
+
       </div>
     </main>
   );
