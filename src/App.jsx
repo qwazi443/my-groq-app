@@ -139,7 +139,7 @@ class AudioEngine {
     
     // MONOPHONIC TRACKERS (Prevent overlap echo)
     this.activeBassNode = null;
-    this.activeLeadNode = null;
+    this.activeKickNode = null; // New Kick Tracker
     
     this.onStatusUpdate = onStatusUpdate || console.log;
   }
@@ -162,9 +162,10 @@ class AudioEngine {
         const arrayBuffer = await response.arrayBuffer();
         const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
         this.buffers[inst.id] = audioBuffer;
-        console.log(`Loaded ${inst.id}`);
+        console.log(`✅ Loaded ${inst.id}`);
       } catch (e) {
-        console.warn(`Sample failed: ${path}, defaulting to synth.`);
+        console.warn(`❌ FAILED: ${path}, defaulting to synth.`);
+        if(this.onStatusUpdate) this.onStatusUpdate(`Error loading ${inst.id}`);
       }
     });
     await Promise.all(promises);
@@ -172,9 +173,13 @@ class AudioEngine {
   }
 
   playNote(instId, pitch, time, duration, velocity = 100) {
-    // 1. MONOPHONIC CUTOFF (The Anti-Echo Fix)
+    // 1. MONOPHONIC BASS CUTOFF
     if (instId === 'bass' && this.activeBassNode) {
         try { this.activeBassNode.stop(time); } catch(e){}
+    }
+    // 2. MONOPHONIC KICK CUTOFF (Fixes Kick Echo)
+    if (instId === 'kick' && this.activeKickNode) {
+        try { this.activeKickNode.stop(time); } catch(e){}
     }
     
     if (this.buffers[instId]) {
@@ -188,14 +193,18 @@ class AudioEngine {
     const source = this.ctx.createBufferSource();
     source.buffer = this.buffers[id];
     
-    // TRACK THE BASS
+    // TRACKERS
     if (id === 'bass') this.activeBassNode = source;
+    if (id === 'kick') this.activeKickNode = source;
 
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(velocity / 127, time);
     
-    // Shorten the tail for bass to prevent muddy mix
-    const tail = id === 'bass' ? 0.3 : source.buffer.duration;
+    // Shorten tail for punchy drums
+    let tail = source.buffer.duration;
+    if (id === 'bass') tail = 0.3;
+    if (id === 'kick') tail = 0.25; // Tight kick tail
+    
     gain.gain.exponentialRampToValueAtTime(0.01, time + tail);
 
     source.connect(gain);
@@ -232,7 +241,6 @@ class AudioEngine {
     const freq = 440 * Math.pow(2, (midi - 69) / 12);
     osc.frequency.setValueAtTime(freq, time);
     
-    // TRACK THE SYNTH BASS TOO
     this.activeBassNode = osc;
     
     const filter = this.ctx.createBiquadFilter();
@@ -500,7 +508,7 @@ export default function HardHouseGenerator() {
           <div className="flex justify-center items-center gap-4 text-[#39FF14] font-bold tracking-[0.5em] text-xs uppercase">
             <span className="animate-flicker">Status: {audioStatus}</span>
             <div className={`h-2 w-2 rounded-full ${audioStatus === 'Ready' ? 'bg-[#39FF14]' : 'bg-red-500 animate-pulse'}`} />
-            <span>Ver 5.1 (Fixed Bass)</span>
+            <span>Ver 5.2 (Fixed Kick & Clap)</span>
           </div>
         </header>
 
