@@ -28,19 +28,19 @@ class ErrorBoundary extends React.Component {
 // --- CONSTANTS ---
 const KEYS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const SCALES = ['Minor', 'Phrygian', 'Dorian', 'Major', 'Harmonic Minor']; 
-const PRODUCER_STYLES = ['Tidy Trax', 'Vicious Circle', 'Nukleuz', 'Paul Glazby', 'Andy Farley', 'Lisa Lashes', 'BK', 'Tony De Vit'];
+const PRODUCER_STYLES = ['Generic', 'Tidy Trax', 'Vicious Circle', 'Nukleuz', 'Paul Glazby', 'Andy Farley', 'Lisa Lashes', 'BK', 'Tony De Vit'];
 const DEFAULT_BPM = 150; 
 
 // TUNING FIX: Set basePitch to C4 for leads (Standard) and C2 for Bass
 const INSTRUMENT_PRESETS = [
-  { id: 'kick', name: '909 Kick', icon: Disc, pitch: 'C2', basePitch: 'C2', file: 'kick1.wav', desc: 'Punchy 909 Kick' },
+  { id: 'kick', name: 'Kick', icon: Disc, pitch: 'C2', basePitch: 'C2', file: 'kick1.wav', desc: 'Punchy 909 Kick' },
   { id: 'clap', name: 'Sharp Clap', icon: Music, pitch: 'D#2', basePitch: 'D#2', file: 'clap1.wav', desc: 'Classic Handclap' },
-  { id: 'snare', name: 'Snare Roll', icon: Speaker, pitch: 'D2', basePitch: 'D2', file: 'snare1.wav', desc: 'Rapid Snare Fills' },
-  { id: 'hat_open', name: '909 Open', icon: Volume2, pitch: 'F#2', basePitch: 'F#2', file: 'hat_open1.wav', desc: 'Offbeat Hi-Hat' },
-  { id: 'hat_closed', name: '909 Closed', icon: Disc, pitch: 'G#2', basePitch: 'G#2', file: 'hat_closed1.wav', desc: 'Driving 16th Hats' },
-  { id: 'bass', name: 'Donk Bass', icon: Activity, pitch: 'D3', basePitch: 'C2', file: 'bass1.wav', desc: 'FM Donk / Offbeat Bass' }, 
-  { id: 'lead', name: 'Alpha Hoover', icon: Zap, pitch: 'C4', basePitch: 'C4', file: 'lead1.wav', desc: 'Massive Pitch-Ramp Saw' },
-  { id: 'hoover', name: 'Acid Screech', icon: Disc, pitch: 'F3', basePitch: 'C4', file: 'hoover1.wav', desc: 'Distorted 303 Square' },
+  { id: 'snare', name: 'Snare', icon: Speaker, pitch: 'D2', basePitch: 'D2', file: 'snare1.wav', desc: 'Rapid Snare Fills' },
+  { id: 'hat_open', name: 'Hats Open', icon: Volume2, pitch: 'F#2', basePitch: 'F#2', file: 'hat_open1.wav', desc: 'Offbeat Hi-Hat' },
+  { id: 'hat_closed', name: 'Hats Closed', icon: Disc, pitch: 'G#2', basePitch: 'G#2', file: 'hat_closed1.wav', desc: 'Driving 16th Hats' },
+  { id: 'bass', name: 'Bass', icon: Activity, pitch: 'D3', basePitch: 'C2', file: 'bass1.wav', desc: 'Offbeat Bass' }, 
+  { id: 'lead', name: 'Lead', icon: Zap, pitch: 'C4', basePitch: 'C4', file: 'lead1.wav', desc: 'Massive Pitch-Ramp Saw' },
+  { id: 'hoover', name: 'Hoover', icon: Disc, pitch: 'F3', basePitch: 'C4', file: 'hoover1.wav', desc: 'Distorted 303 Square' },
 ];
 
 const PROMPT_EXAMPLES = [
