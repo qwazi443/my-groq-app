@@ -1,11 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-// Using ONLY safe, older icons guaranteed to exist in v0.294.0
-import { Download, Zap, Disc, Music, Speaker, Volume2, Activity, AlertCircle, Play, Square, Info, Sliders, HelpCircle, X, Settings, Box } from 'lucide-react';
+import { Download, Wand2, Zap, Disc, Music, Speaker, Volume2, Activity, AlertCircle, Play, Square, Info, Sliders, HelpCircle, X, Dice5, Volume1, Package, ToggleLeft, ToggleRight, FileAudio, AlertTriangle } from 'lucide-react';
 import JSZip from 'jszip'; 
 
-// --- ERROR BOUNDARY (Prevents White Screen) ---
+// --- ERROR BOUNDARY ---
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -16,9 +15,9 @@ class ErrorBoundary extends React.Component {
     if (this.state.hasError) {
       return (
         <div style={{ color: '#FF00FF', padding: '50px', background: '#000', fontFamily: 'monospace' }}>
-          <h1>CRITICAL SYSTEM FAILURE</h1>
-          <p>The app crashed. Here is the error:</p>
-          <pre style={{ border: '1px solid #333', padding: '20px' }}>{this.state.error.toString()}</pre>
+          <h1>SYSTEM FAILURE</h1>
+          <p>The app crashed. Error details:</p>
+          <pre style={{ border: '1px solid #333', padding: '20px', color: 'white' }}>{this.state.error.toString()}</pre>
         </div>
       );
     }
@@ -32,7 +31,6 @@ const SCALES = ['Minor', 'Phrygian', 'Dorian', 'Major', 'Harmonic Minor'];
 const PRODUCER_STYLES = ['Tidy Trax', 'Vicious Circle', 'Nukleuz', 'Paul Glazby', 'Andy Farley', 'Lisa Lashes', 'BK', 'Tony De Vit'];
 const DEFAULT_BPM = 150; 
 
-// Replaced 'Drum' with 'Disc' (Safe)
 const INSTRUMENT_PRESETS = [
   { id: 'kick', name: '909 Kick', icon: Disc, pitch: 'C2', file: 'kick1.wav', desc: 'Punchy 909 Kick (On-beat)' },
   { id: 'clap', name: 'Sharp Clap', icon: Music, pitch: 'D#2', file: 'clap1.wav', desc: 'Classic Handclap' },
@@ -142,7 +140,7 @@ function makeDistortionCurve(amount) {
   return curve;
 }
 
-// --- AUDIO ENGINE ---
+// --- UK HARD HOUSE AUDIO ENGINE (V20.0 - ANALOG FORCE) ---
 class AudioEngine {
   constructor(onStatusUpdate, onSampleStatus) {
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -190,10 +188,10 @@ class AudioEngine {
   async loadBank(presets) {
     const promises = presets.map(async (inst) => {
       if (!inst.file) return;
-      // PATH HUNTER: Try relative paths first to fix Vercel lookup
       const possiblePaths = [
-          `samples/${inst.file}`, 
           `/samples/${inst.file}`, 
+          `/public/samples/${inst.file}`,
+          `/${inst.file}`,
           inst.file
       ];
 
@@ -204,24 +202,21 @@ class AudioEngine {
             this.onSampleStatus(inst.id, 'loading');
             const response = await fetch(path);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            
             const type = response.headers.get("content-type");
             if (type && type.includes("text/html")) throw new Error("HTML (404)");
-
             const arrayBuffer = await response.arrayBuffer();
-            if (arrayBuffer.byteLength < 2000) throw new Error("Too small");
+            if (arrayBuffer.byteLength < 1000) throw new Error("Too small"); 
 
             const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
             this.buffers[inst.id] = audioBuffer;
             loaded = true;
             this.onSampleStatus(inst.id, 'success');
           } catch (e) {
-            // Try next path
+            // Try next
           }
       }
       
       if (!loaded) {
-          console.warn(`All paths failed for ${inst.id}`);
           this.onSampleStatus(inst.id, 'error');
       }
     });
@@ -230,19 +225,20 @@ class AudioEngine {
   }
 
   playNote(instId, pitch, time, duration, velocity = 100) {
-    if (!this.buffers[instId] && !this.allowSynths) return;
-
-    // 1. FORCE SYNTH FOR LEAD & HOOVER
+    // 1. FORCE SYNTH FOR LEAD & HOOVER (Fixes 8-bit sound)
+    // These instruments require dynamic pitch envelopes that samples cannot provide.
+    // We IGNORE the 'allowSynths' toggle for these because they are Primary Engines.
     if (instId === 'lead' || instId === 'hoover') {
-       this.playSynth(instId, pitch, time, duration, velocity);
+       this.playSynth(instId, pitch, time, duration, velocity, true); // True = Force
        return; 
     }
     
-    // 2. PLAY SAMPLE IF EXISTS
+    // 2. CHECK FOR SAMPLE
     if (this.buffers[instId]) {
       this.playSample(instId, time, velocity);
     } else {
-      this.playSynth(instId, pitch, time, duration, velocity);
+      // 3. FALLBACK TO SYNTH (Respects Toggle)
+      this.playSynth(instId, pitch, time, duration, velocity, false);
     }
   }
 
@@ -269,8 +265,10 @@ class AudioEngine {
     if(this.activeNodes.length > 40) this.activeNodes.shift();
   }
 
-  playSynth(instId, pitch, time, duration, velocity) {
-    if (!this.allowSynths) return;
+  playSynth(instId, pitch, time, duration, velocity, force = false) {
+    // If not forced (fallback) and synths disabled, exit
+    if (!force && !this.allowSynths) return;
+
     const vel = velocity / 127;
     if (instId === 'kick') this.synthKick(time, vel);
     else if (instId === 'bass') this.synthDonk(pitch, time, duration, vel); 
@@ -309,29 +307,46 @@ class AudioEngine {
   }
   
   synthMassiveHoover(pitch, time, dur, vel) {
+    // UPDATED HOOVER: Heavier detune, thicker sound
     const targetFreq = 440 * Math.pow(2, (noteToMidiNum(pitch) - 69) / 12);
     const attack = 0.15; 
+    
     const createOsc = (detune, pan, type = 'sawtooth', octShift = 0) => {
         const osc = this.ctx.createOscillator();
         osc.type = type;
+        
+        // Pitch Envelope (The Vacuum)
         osc.frequency.setValueAtTime(targetFreq * 0.5, time); 
         osc.frequency.exponentialRampToValueAtTime(targetFreq * (octShift === -1 ? 0.5 : 1), time + attack);
         osc.detune.setValueAtTime(detune, time);
+
+        // Filter (The Grit)
         const filter = this.ctx.createBiquadFilter();
         filter.type = 'lowpass';
         filter.frequency.setValueAtTime(800, time);
         filter.frequency.exponentialRampToValueAtTime(12000, time + attack); 
         filter.Q.value = 1;
+
         const panner = this.ctx.createStereoPanner();
         panner.pan.value = pan;
+
         const g = this.ctx.createGain();
-        g.gain.setValueAtTime(vel * 0.25, time); 
+        // Increased volume for Lead
+        g.gain.setValueAtTime(vel * 0.3, time); 
         g.gain.linearRampToValueAtTime(0, time + dur); 
+        
         osc.connect(filter).connect(panner).connect(g).connect(this.masterGain);
         osc.start(time); osc.stop(time + dur);
         this.activeNodes.push(osc);
     };
-    createOsc(0, 0); createOsc(-25, -0.6); createOsc(25, 0.6); createOsc(-10, -0.3); createOsc(10, 0.3); createOsc(0, 0, 'square', -1);
+
+    // 5-Stack Oscillator for Massiveness
+    createOsc(0, 0);     
+    createOsc(-25, -0.6);   
+    createOsc(25, 0.6);    
+    createOsc(-10, -0.3);   
+    createOsc(10, 0.3);    
+    createOsc(0, 0, 'square', -1); // Sub Bass
   }
 
   synthAcidScreech(pitch, time, dur, vel) {
@@ -339,18 +354,22 @@ class AudioEngine {
     const osc = this.ctx.createOscillator();
     osc.type = 'square'; 
     osc.frequency.setValueAtTime(freq, time);
+    
     const shaper = this.ctx.createWaveShaper();
     shaper.curve = this.distCurve;
     shaper.oversample = '4x';
+    
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.setValueAtTime(200, time);
-    filter.frequency.exponentialRampToValueAtTime(2500, time + 0.1); 
+    filter.frequency.exponentialRampToValueAtTime(3500, time + 0.1); // Higher sweep
     filter.frequency.exponentialRampToValueAtTime(freq, time + dur);
-    filter.Q.value = 15; 
+    filter.Q.value = 20; // More Resonance
+    
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(vel * 0.5, time);
     g.gain.exponentialRampToValueAtTime(0.01, time + dur);
+    
     osc.connect(filter).connect(shaper).connect(g).connect(this.masterGain);
     osc.start(time); osc.stop(time + dur);
     this.activeNodes.push(osc);
@@ -374,17 +393,44 @@ class AudioEngine {
   }
 }
 
-// --- COMPONENTS ---
+// --- HELPER COMPONENTS ---
 
-// Manual Check Icon because 'Check' might not exist in old Lucide
+const Tooltip = ({ text, children }) => (
+  <div className="relative group flex items-center">
+    {children}
+    <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 bg-gray-900 text-white text-xs p-2 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 border border-white/20 text-center">
+      {text}
+      <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-gray-900"></div>
+    </div>
+  </div>
+);
+
+const Knob = ({ label, value, onChange, options, help }) => (
+  <div className="flex flex-col gap-1 w-full">
+    <div className="flex items-center gap-1">
+      <label htmlFor={label} className="text-[10px] uppercase font-bold text-[#39FF14] tracking-wider">{label}</label>
+      {help && <Tooltip text={help}><Info size={10} className="text-gray-500 hover:text-white cursor-help" /></Tooltip>}
+    </div>
+    <select 
+      id={label}
+      value={value} 
+      onChange={onChange}
+      className="bg-[#1a1a1a] border border-[#333] rounded text-white p-2 text-sm font-mono focus:border-[#39FF14] outline-none cursor-pointer hover:bg-[#222] transition-colors"
+      aria-label={`Select ${label}`}
+    >
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  </div>
+);
+
 const CheckIcon = () => <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>;
 const AlertIcon = () => <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
 
 const HelpModal = ({ onClose, sampleStatus }) => (
-  <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-    <div className="bg-[#111] border-2 border-[#39FF14] rounded-2xl max-w-lg w-full p-6 relative shadow-[0_0_50px_rgba(57,255,20,0.2)]">
-      <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={24} /></button>
-      <h2 className="text-2xl font-black text-[#39FF14] mb-4 uppercase">System Status</h2>
+  <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div className="bg-[#111] border-2 border-[#39FF14] rounded-2xl max-w-lg w-full p-6 relative shadow-[0_0_50px_rgba(57,255,20,0.2)] animate-in fade-in zoom-in duration-200">
+      <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white" aria-label="Close Modal"><X size={24} /></button>
+      <h2 id="modal-title" className="text-2xl font-black text-[#39FF14] mb-4 uppercase">Asset Status</h2>
       
       <div className="grid grid-cols-2 gap-2 mb-6 text-xs font-mono border border-white/10 p-4 rounded bg-black/50">
         {Object.entries(sampleStatus).map(([id, status]) => (
@@ -396,7 +442,11 @@ const HelpModal = ({ onClose, sampleStatus }) => (
             </div>
         ))}
       </div>
-      <button onClick={onClose} className="w-full mt-6 bg-[#39FF14] text-black font-bold py-3 rounded hover:opacity-90">CLOSE</button>
+      <div className="space-y-4 text-gray-300 text-sm">
+        <p><strong className="text-white">SYNTH MODE:</strong> The .wav file failed to load. The engine is using a digital recreation.</p>
+        <p><strong className="text-white">WAV MODE:</strong> The original sample file is playing.</p>
+      </div>
+      <button onClick={onClose} className="w-full mt-6 bg-[#39FF14] text-black font-bold py-3 rounded hover:opacity-90">START PRODUCING</button>
     </div>
   </div>
 );
@@ -466,6 +516,15 @@ function HardHouseGenerator() {
       }
     };
     if (isPlaying) draw();
+    else {
+        ctx.fillStyle = '#050505';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = '#222';
+        ctx.beginPath();
+        ctx.moveTo(0, canvas.height/2);
+        ctx.lineTo(canvas.width, canvas.height/2);
+        ctx.stroke();
+    }
     return () => cancelAnimationFrame(animationId);
   }, [isPlaying]);
 
@@ -588,6 +647,8 @@ function HardHouseGenerator() {
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
 
+  const handleRandomizePrompt = () => setPrompt(PROMPT_EXAMPLES[Math.floor(Math.random() * PROMPT_EXAMPLES.length)]);
+
   return (
     <main className="min-h-screen bg-[#050505] text-white font-sans selection:bg-[#39FF14] selection:text-black">
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} sampleStatus={sampleStatus} />}
@@ -601,7 +662,7 @@ function HardHouseGenerator() {
             </h1>
             <div className="flex items-center gap-2 text-[#39FF14] font-mono text-xs uppercase mt-2">
               <div className={`h-2 w-2 rounded-full ${audioStatus === 'Ready' ? 'bg-[#39FF14]' : 'bg-red-500 animate-pulse'}`} />
-              <span>v17.2 Safe Mode</span>
+              <span>v20.0 Analog Force</span>
             </div>
           </div>
           <div className="flex gap-2">
@@ -619,13 +680,51 @@ function HardHouseGenerator() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <section className="lg:col-span-4 space-y-6">
-             {/* SIMPLIFIED CONTROLS FOR SAFETY */}
-             <div className="bg-[#0A0A0A] border border-white/10 rounded-xl p-6">
-                <div className="flex justify-between items-center mb-4">
-                    <span className="text-[#39FF14] font-bold uppercase text-xs">BPM</span>
-                    <input type="number" value={bpm} onChange={(e) => setBpm(Number(e.target.value))} className="bg-[#222] text-white p-1 rounded w-16 text-center" />
+             <div className="bg-[#0A0A0A] border border-white/10 rounded-xl p-6 relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-1 h-full bg-[#39FF14]" />
+                <div className="flex items-center gap-2 mb-6 text-gray-400 text-xs font-black uppercase tracking-widest">
+                  <Sliders size={14} /> Producer Controls
+                </div>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <Knob label="Key" value={selectedKey} onChange={(e) => setSelectedKey(e.target.value)} options={KEYS} />
+                    <Knob label="Scale" value={selectedScale} onChange={(e) => setSelectedScale(e.target.value)} options={SCALES} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                     <Knob label="BPM" value={bpm} onChange={(e) => setBpm(Number(e.target.value))} options={[140, 145, 150, 155, 160, 170]} />
+                     <Knob label="Style" value={selectedStyle} onChange={(e) => setSelectedStyle(e.target.value)} options={PRODUCER_STYLES} />
+                  </div>
+                  <div className="pt-2">
+                      <div className="flex justify-between text-[10px] font-bold text-[#39FF14] uppercase mb-1">
+                          <span>Pattern Density</span>
+                          <span>{Math.round(density * 100)}%</span>
+                      </div>
+                      <input 
+                          type="range" min="0.2" max="1.2" step="0.1" 
+                          value={density} onChange={(e) => setDensity(Number(e.target.value))}
+                          className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-[#39FF14]"
+                      />
+                  </div>
                 </div>
              </div>
+
+             <div className="bg-[#0A0A0A] border border-white/10 rounded-xl p-6 relative">
+              <div className="absolute top-0 left-0 w-1 h-full bg-[#FF00FF]" />
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center gap-2 text-gray-400 text-xs font-black uppercase tracking-widest">
+                  <Wand2 size={14} /> AI Context
+                </div>
+                <button onClick={handleRandomizePrompt} className="text-gray-500 hover:text-[#FF00FF] transition-colors" aria-label="Randomize Prompt"><Dice5 size={16} /></button>
+              </div>
+              <label htmlFor="promptInput" className="sr-only">Describe your pattern</label>
+              <textarea 
+                id="promptInput"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="Ex: Dark Acid Techno drop..."
+                className="w-full bg-black/50 border border-white/20 rounded-lg p-4 text-gray-200 placeholder:text-gray-600 focus:border-[#FF00FF] focus:ring-1 focus:ring-[#FF00FF] outline-none transition-all h-24 resize-none text-sm font-mono"
+              />
+            </div>
           </section>
 
           <section className="lg:col-span-8 space-y-6">
@@ -654,7 +753,6 @@ function HardHouseGenerator() {
                 <div onClick={(e) => handlePreview(inst.id, e)} className="absolute top-2 right-2 p-1 bg-black/50 hover:bg-white text-white hover:text-black rounded-full z-10">
                     <Volume1 size={12} />
                 </div>
-                {/* STATUS DOT */}
                 <div className={`absolute top-2 left-2 w-2 h-2 rounded-full ${sampleStatus[inst.id] === 'success' ? 'bg-[#39FF14]' : sampleStatus[inst.id] === 'error' ? 'bg-[#FF00FF]' : 'bg-gray-600'}`} />
                 <inst.icon size={24} />
                 <span className="text-[10px] font-bold uppercase tracking-widest">{inst.name}</span>
