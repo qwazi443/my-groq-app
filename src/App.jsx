@@ -3,10 +3,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Download, Wand2, Zap, Disc, Music, Drum, Speaker, Volume2, Activity, AlertCircle, Play, Square } from 'lucide-react';
 
-// --- CONSTANTS (UK HARD HOUSE / NRG SPECIFIC) ---
+// --- CONSTANTS ---
 const KEYS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-
-// Restricted Scales for that "Dark/Hard" vibe
 const SCALES = ['Minor', 'Phrygian', 'Dorian']; 
 const PRODUCER_STYLES = ['Tidy Trax', 'Vicious Circle', 'Nukleuz', 'Paul Glazby', 'Andy Farley', 'Lisa Lashes', 'BK', 'Tony De Vit'];
 const DEFAULT_BPM = 150; 
@@ -27,7 +25,7 @@ const RHYTHM_LIB = {
   OFFBEAT: [2, 6, 10, 14], 
   GALLOP: [0, 2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15], 
   ROLLING: [0, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15],
-  ACID_ROLL: [0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14], // Classic 303 rolling rhythm
+  ACID_ROLL: [0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14], 
   DEMENTED: [0, 3, 6, 8, 11, 14],
   SPEED: Array.from({ length: 16 }, (_, i) => i),
 };
@@ -131,10 +129,9 @@ class AudioEngine {
 
     this.buffers = {};
     
-    // MONO TRACKERS
     this.activeBassNode = null;
     this.activeKickNode = null; 
-    this.activeLeadNodes = []; // Array because Hoover uses multiple oscs
+    this.activeLeadNodes = []; 
     
     this.onStatusUpdate = onStatusUpdate || console.log;
   }
@@ -185,13 +182,19 @@ class AudioEngine {
     if (instId === 'bass' && this.activeBassNode) try { this.activeBassNode.stop(time); } catch(e){}
     if (instId === 'kick' && this.activeKickNode) try { this.activeKickNode.stop(time); } catch(e){}
     
-    // Kill previous lead nodes if new lead starts (Monophonic Lead)
     if (instId === 'lead') {
         this.activeLeadNodes.forEach(n => { try{n.stop(time);}catch(e){} });
         this.activeLeadNodes = [];
     }
+
+    // 2. FORCE SYNTH FOR LEAD (CRITICAL FIX)
+    // Ignore samples for lead to ensure Hoover sound
+    if (instId === 'lead' || instId === 'hoover') {
+       this.playSynth(instId, pitch, time, duration, velocity);
+       return; 
+    }
     
-    // 2. CHECK FOR SAMPLE FIRST
+    // 3. CHECK FOR SAMPLE FOR OTHERS
     if (this.buffers[instId]) {
       this.playSample(instId, time, velocity);
     } else {
@@ -231,8 +234,6 @@ class AudioEngine {
     else if (instId === 'clap') this.synthClap(time, vel);
   }
 
-  // --- SYNTH MODELS ---
-
   synthKick(time, vel) {
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
@@ -245,7 +246,6 @@ class AudioEngine {
   }
 
   synthDonk(pitch, time, dur, vel) {
-    // FM DONK
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
     osc.type = 'square'; 
@@ -268,35 +268,43 @@ class AudioEngine {
   }
   
   synthSuperHoover(pitch, time, dur, vel) {
-    // THE "SUPER HOOVER" (3x Saw + Chorus)
+    // THE "SUPER HOOVER" (LOUDER & WIDER)
     const targetFreq = 440 * Math.pow(2, (noteToMidiNum(pitch) - 69) / 12);
-    const attack = 0.1; // The "Vacuum" speed
+    const attack = 0.15; // Slower vacuum up
     
-    // We create 3 oscillators for WIDTH
-    const createOsc = (detuneCents) => {
+    const createOsc = (detuneCents, panVal) => {
         const osc = this.ctx.createOscillator();
         osc.type = 'sawtooth';
         
-        // PITCH ENVELOPE: Start 2 octaves down, ramp up (The "Hoo")
+        // Pitch Envelope
         osc.frequency.setValueAtTime(targetFreq * 0.25, time); 
         osc.frequency.exponentialRampToValueAtTime(targetFreq, time + attack);
-        
-        // Apply Detune (The "Chorus")
         osc.detune.setValueAtTime(detuneCents, time);
 
+        // Filter for "Acid" bite
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(500, time);
+        filter.frequency.exponentialRampToValueAtTime(8000, time + attack); // Open up
+        filter.Q.value = 2;
+
+        // Panning (Stereo Width)
+        const panner = this.ctx.createStereoPanner();
+        panner.pan.value = panVal;
+
         const g = this.ctx.createGain();
-        g.gain.setValueAtTime(vel * 0.3, time); // Lower vol per osc
-        g.gain.linearRampToValueAtTime(0, time + dur); // Sustain
+        g.gain.setValueAtTime(vel * 0.4, time); // Boost volume
+        g.gain.linearRampToValueAtTime(0, time + dur); 
         
-        osc.connect(g).connect(this.masterGain);
+        osc.connect(filter).connect(panner).connect(g).connect(this.masterGain);
         osc.start(time); osc.stop(time + dur);
         
         this.activeLeadNodes.push(osc);
     };
 
-    createOsc(0);     // Center
-    createOsc(-15);   // Left
-    createOsc(15);    // Right
+    createOsc(0, 0);     // Center
+    createOsc(-20, -0.5);   // Left
+    createOsc(20, 0.5);    // Right
   }
 
   synthHat(time, isOpen, vel) {
@@ -410,12 +418,9 @@ export default function HardHouseGenerator() {
     if (window.HARDHOUSE_AUDIO) window.HARDHOUSE_AUDIO.kill();
   }, []);
 
-  // --- CHAOS MODE (FALLBACK) ---
   const generateLocalPattern = (instrumentsToUse) => {
     const notes = [];
     const bassRhythm = RHYTHM_LIB.OFFBEAT; 
-    
-    // Acid/Lead needs to be 16th notes and rolly
     const leadRhythm = RHYTHM_LIB.ACID_ROLL; 
 
     for (let step = 0; step < 16; step++) {
@@ -429,9 +434,8 @@ export default function HardHouseGenerator() {
       
       // LEAD: Acid Logic (Octave Jumps)
       if (instrumentsToUse.includes('lead') && leadRhythm.includes(step)) {
-        // Randomly jump octave for that "Acid" feel
         const octaveJump = Math.random() > 0.6 ? 1 : 0;
-        const degree = [0, 2, 3, 5, 7][step % 5]; // Pentatonic-ish
+        const degree = [0, 2, 3, 5, 7][step % 5];
         notes.push({ 
             instId: 'lead', 
             pitch: noteFromScale(selectedKey, selectedScale, degree, 4 + octaveJump), 
@@ -558,7 +562,7 @@ export default function HardHouseGenerator() {
           <div className="flex justify-center items-center gap-4 text-[#39FF14] font-bold tracking-[0.5em] text-xs uppercase">
             <span className="animate-flicker">Status: {audioStatus}</span>
             <div className={`h-2 w-2 rounded-full ${audioStatus === 'Ready' ? 'bg-[#39FF14]' : 'bg-red-500 animate-pulse'}`} />
-            <span>Ver 9.0 (Super Saw Edition)</span>
+            <span>Ver 10.0 (Synth Force)</span>
           </div>
         </header>
 
