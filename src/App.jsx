@@ -5,8 +5,8 @@ import { Download, Wand2, Zap, Disc, Music, Drum, Speaker, Volume2, Activity, Al
 
 // --- CONSTANTS ---
 const KEYS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-const SCALES = ['Minor', 'Phrygian', 'Dorian']; 
-const PRODUCER_STYLES = ['Tidy Trax', 'Vicious Circle', 'Nukleuz', 'Paul Glazby', 'Andy Farley', 'Lisa Lashes', 'BK', 'Tony De Vit'];
+const SCALES = ['Minor', 'Major', 'Phrygian', 'Dorian']; 
+const PRODUCER_STYLES = ['Generic', 'Tidy Trax', 'Vicious Circle', 'Nukleuz', 'Paul Glazby', 'Andy Farley', 'Lisa Lashes', 'BK', 'Tony De Vit'];
 const DEFAULT_BPM = 150; 
 
 const INSTRUMENT_PRESETS = [
