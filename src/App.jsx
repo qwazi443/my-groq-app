@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Download, Wand2, Zap, Disc, Music, Drum, Speaker, Volume2, Activity, AlertCircle, Play, Square, Info, Sliders, HelpCircle, X, Dice5, Volume1, Settings } from 'lucide-react';
+import { Download, Wand2, Zap, Disc, Music, Drum, Speaker, Volume2, Activity, AlertCircle, Play, Square, Info, Sliders, HelpCircle, X, Dice5, Volume1, Settings, Package } from 'lucide-react';
+import JSZip from 'jszip'; // NEW: Import Zip Library
 
 // --- CONSTANTS ---
 const KEYS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -59,11 +60,13 @@ function writeMidiFile(notes) {
   const events = [];
   notes.forEach(n => {
     const midiNote = noteToMidiNum(n.pitch);
-    // Channel Mapping: Drums=10 (9), Bass=2 (1), Lead=1 (0)
+    // Channel Mapping: Drums=10 (9), Bass=2 (1), Lead=1 (0), Others=3-8
     let channel = 0;
-    if (['kick', 'clap', 'snare', 'hat_open', 'hat_closed'].includes(n.instId)) channel = 9;
-    else if (n.instId === 'bass') channel = 1;
-    else channel = 0;
+    if (['kick', 'clap', 'snare', 'hat_open', 'hat_closed'].includes(n.instId)) channel = 9; // MIDI Ch 10
+    else if (n.instId === 'bass') channel = 1; // MIDI Ch 2
+    else if (n.instId === 'lead') channel = 0; // MIDI Ch 1
+    else if (n.instId === 'hoover') channel = 2; // MIDI Ch 3
+    else if (n.instId === 'stabs') channel = 3; // MIDI Ch 4
     
     events.push({ type: 'on', tick: n.startTick, note: midiNote, velocity: n.velocity || 100, channel });
     const durationTicks = parseInt(n.duration || '2') * (128 / 4);
@@ -72,8 +75,8 @@ function writeMidiFile(notes) {
   events.sort((a, b) => a.tick - b.tick);
 
   const data = [
-    0x4d, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06, 0x00, 0x01, 0x00, 0x01, 0x00, 0x80,
-    0x4d, 0x54, 0x72, 0x6b
+    0x4d, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06, 0x00, 0x01, 0x00, 0x01, 0x00, 0x80, // Header
+    0x4d, 0x54, 0x72, 0x6b // Track Header
   ];
   
   const trackData = [];
@@ -97,7 +100,10 @@ function writeMidiFile(notes) {
     trackData.push(status, e.note, e.velocity);
   });
   
+  // End of Track
   trackData.push(0x00, 0xff, 0x2f, 0x00);
+
+  // Track Length
   const len = trackData.length;
   data.push((len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff);
   data.push(...trackData);
@@ -157,7 +163,6 @@ class AudioEngine {
     const now = this.ctx.currentTime;
     this.masterGain.gain.cancelScheduledValues(now);
     this.masterGain.gain.setValueAtTime(0, now);
-    // Smooth restoration of volume for next play
     this.masterGain.gain.linearRampToValueAtTime(0.5, now + 0.1); 
     
     this.activeNodes.forEach(n => { try{n.stop();}catch(e){} });
@@ -175,7 +180,7 @@ class AudioEngine {
         const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
         this.buffers[inst.id] = audioBuffer;
       } catch (e) {
-        // Silent fail, will use synth
+        // Silent fail
       }
     });
     await Promise.all(promises);
@@ -195,11 +200,9 @@ class AudioEngine {
     }
   }
 
-  // Used for UI Previews
   preview(instId) {
     this.resume();
     const now = this.ctx.currentTime;
-    // Default preview pitches
     const pitch = instId === 'bass' ? 'D3' : instId === 'lead' ? 'C4' : 'C3';
     this.playNote(instId, pitch, now, '1', 100);
   }
@@ -234,8 +237,6 @@ class AudioEngine {
     else if (instId === 'hoover') this.synthAcidScreech(pitch, time, duration, vel); 
     else this.synthHat(time, instId.includes('open'), vel);
   }
-
-  // --- SYNTH MODELS ---
 
   synthKick(time, vel) {
     const osc = this.ctx.createOscillator();
@@ -371,7 +372,7 @@ const HelpModal = ({ onClose }) => (
         <p><strong className="text-white">1. Select Instruments:</strong> Use the matrix below. Toggle sounds on/off. Click the tiny <Play size={10} className="inline"/> button to preview.</p>
         <p><strong className="text-white">2. Set Density:</strong> Use the Density slider to control how busy the pattern is (Minimal vs. Chaotic).</p>
         <p><strong className="text-white">3. Generate:</strong> Click "GENERATE DROP" to create a unique, algorithmic pattern.</p>
-        <p><strong className="text-white">4. Export:</strong> "Extract MIDI" creates a multi-channel MIDI file for your DAW.</p>
+        <p><strong className="text-white">4. Export:</strong> "Export MIDI Zip" downloads a .zip file containing the full pattern AND individual instrument stems.</p>
       </div>
       <button onClick={onClose} className="w-full mt-6 bg-[#39FF14] text-black font-bold py-3 rounded hover:opacity-90">GOT IT</button>
     </div>
@@ -392,7 +393,7 @@ export default function HardHouseGenerator() {
   const [selectedInstruments, setSelectedInstruments] = useState(['kick', 'hat_open', 'bass', 'lead']);
   const [errorMsg, setErrorMsg] = useState('');
   const [audioStatus, setAudioStatus] = useState('Init...');
-  const [showHelp, setShowHelp] = useState(true); // Show on first load
+  const [showHelp, setShowHelp] = useState(true);
 
   const isPlayingRef = useRef(false);
   const canvasRef = useRef(null);
@@ -471,26 +472,20 @@ export default function HardHouseGenerator() {
     const getVel = (base) => base + Math.floor(Math.random() * 20 - 10);
     
     for (let step = 0; step < 16; step++) {
-      // 1. KICK (On Beat)
       if (instrumentsToUse.includes('kick') && step % 4 === 0) {
         notes.push({ instId: 'kick', pitch: 'C2', duration: '1', velocity: 127, startTick: step * 128 });
       }
       
-      // 2. BASS (Off Beat + Gallop Logic)
       if (instrumentsToUse.includes('bass')) {
-         // Standard Donk (2, 6, 10, 14)
          if ([2, 6, 10, 14].includes(step)) {
             notes.push({ instId: 'bass', pitch: noteFromScale(selectedKey, selectedScale, 0, 2), duration: '2', velocity: getVel(115), startTick: step * 128 });
          }
-         // Reverse Bass / Gallop (add extra note before kick if density is high)
          if (density > 0.6 && [3, 7, 11, 15].includes(step)) {
              notes.push({ instId: 'bass', pitch: noteFromScale(selectedKey, selectedScale, 0, 2), duration: '1', velocity: getVel(90), startTick: step * 128 });
          }
       }
 
-      // 3. LEAD (Acid Rolls + Complexity)
       if (instrumentsToUse.includes('lead')) {
-        // Higher density = more chance of notes
         const baseChance = [0, 4, 8, 12].includes(step) ? 0.3 : 0.8; 
         if (Math.random() < baseChance * density) {
             const octaveJump = Math.random() > 0.7 ? 1 : 0;
@@ -505,7 +500,6 @@ export default function HardHouseGenerator() {
         }
       }
 
-      // 4. ACID SCREECH (Sparse Accents)
       if (instrumentsToUse.includes('hoover')) {
          if (Math.random() < 0.2 * density) {
              const degree = [0, 5, 7][Math.floor(Math.random() * 3)];
@@ -519,7 +513,6 @@ export default function HardHouseGenerator() {
          }
       }
 
-      // 5. HATS & PERCUSSION
       if (instrumentsToUse.includes('hat_open') && step % 4 === 2) {
         notes.push({ instId: 'hat_open', pitch: 'F#2', duration: '2', velocity: getVel(100), startTick: step * 128 });
       }
@@ -527,7 +520,6 @@ export default function HardHouseGenerator() {
          notes.push({ instId: 'hat_closed', pitch: 'G#2', duration: '1', velocity: getVel(70), startTick: step * 128 });
       }
       if (instrumentsToUse.includes('snare') && density > 0.8 && step % 16 >= 12) {
-         // Snare roll at end of bar
          notes.push({ instId: 'snare', pitch: 'D2', duration: '1', velocity: getVel(80) + (step%4)*10, startTick: step * 128 });
       }
     }
@@ -566,14 +558,32 @@ export default function HardHouseGenerator() {
 
   const handleRandomizePrompt = () => setPrompt(PROMPT_EXAMPLES[Math.floor(Math.random() * PROMPT_EXAMPLES.length)]);
 
-  const handleDownloadMidi = () => {
+  const handleDownloadMidi = async () => {
     if (currentPattern.length === 0) return;
-    const midiBytes = writeMidiFile(currentPattern);
-    const blob = new Blob([midiBytes], { type: 'audio/midi' });
-    const url = URL.createObjectURL(blob);
+
+    // ZIP Logic
+    const zip = new JSZip();
+
+    // 1. Full Pattern
+    const fullMidi = writeMidiFile(currentPattern);
+    zip.file("full_pattern.mid", fullMidi);
+
+    // 2. Stems
+    const stemsFolder = zip.folder("stems");
+    selectedInstruments.forEach(instId => {
+        const instNotes = currentPattern.filter(n => n.instId === instId);
+        if (instNotes.length > 0) {
+            const instMidi = writeMidiFile(instNotes);
+            stemsFolder.file(`${instId}.mid`, instMidi);
+        }
+    });
+
+    // 3. Download
+    const content = await zip.generateAsync({ type: "blob" });
+    const url = URL.createObjectURL(content);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `hardhouse_pattern_${Date.now()}.mid`;
+    a.download = `hardhouse_kit_${Date.now()}.zip`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -600,7 +610,7 @@ export default function HardHouseGenerator() {
               <div className={`h-2 w-2 rounded-full ${audioStatus === 'Ready' ? 'bg-[#39FF14]' : 'bg-red-500 animate-pulse'}`} />
               <span>System: {audioStatus}</span>
               <span className="text-gray-500">|</span>
-              <span>v14.0 Producer Edition</span>
+              <span>v15.0 Zip Edition</span>
             </div>
           </div>
           <button 
@@ -614,7 +624,6 @@ export default function HardHouseGenerator() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <section className="lg:col-span-4 space-y-6" aria-label="Controls">
-            {/* PRODUCER CONTROLS */}
             <div className="bg-[#0A0A0A] border border-white/10 rounded-xl p-6 relative overflow-hidden">
               <div className="absolute top-0 left-0 w-1 h-full bg-[#39FF14]" />
               <div className="flex items-center gap-2 mb-6 text-gray-400 text-xs font-black uppercase tracking-widest">
@@ -643,7 +652,6 @@ export default function HardHouseGenerator() {
               </div>
             </div>
 
-            {/* PROMPT */}
             <div className="bg-[#0A0A0A] border border-white/10 rounded-xl p-6 relative">
               <div className="absolute top-0 left-0 w-1 h-full bg-[#FF00FF]" />
               <div className="flex justify-between items-center mb-4">
@@ -664,7 +672,6 @@ export default function HardHouseGenerator() {
           </section>
 
           <section className="lg:col-span-8 space-y-6" aria-label="Visualizer and Actions">
-            {/* VISUALIZER */}
             <div className="bg-black border-2 border-white/10 rounded-2xl p-1 h-64 relative shadow-inner shadow-black">
               <canvas ref={canvasRef} width={800} height={256} className="w-full h-full rounded-xl opacity-90" aria-label="Audio Visualizer" role="img" />
               {!isPlaying && (
@@ -675,7 +682,6 @@ export default function HardHouseGenerator() {
               )}
             </div>
 
-            {/* ACTION BAR */}
             <div className="flex flex-col md:flex-row gap-4">
               <button
                 onClick={handleLaunch}
@@ -694,17 +700,16 @@ export default function HardHouseGenerator() {
                 onClick={handleDownloadMidi}
                 disabled={currentPattern.length === 0}
                 className="px-8 rounded-xl border-2 border-white/20 hover:border-white text-white font-bold uppercase text-xs tracking-widest transition-all disabled:opacity-50 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-1 min-w-[120px]"
-                title="Download MIDI file"
-                aria-label="Export MIDI File"
+                title="Download MIDI Zip"
+                aria-label="Export MIDI Zip"
               >
-                <Download size={20} />
-                <span>Export MIDI</span>
+                <Package size={20} />
+                <span>Export Zip</span>
               </button>
             </div>
           </section>
         </div>
 
-        {/* INSTRUMENT MATRIX */}
         <section aria-label="Instrument Selection">
           <div className="flex items-center justify-between mb-4 border-b border-white/10 pb-2">
              <div className="flex items-center gap-2 text-gray-400 text-xs font-black uppercase tracking-widest">
@@ -725,7 +730,6 @@ export default function HardHouseGenerator() {
                 title={inst.desc}
                 aria-pressed={selectedInstruments.includes(inst.id)}
               >
-                {/* PREVIEW BUTTON */}
                 <div 
                     onClick={(e) => handlePreview(inst.id, e)}
                     className="absolute top-2 right-2 p-1 bg-black/50 hover:bg-white text-white hover:text-black rounded-full transition-colors z-10"
