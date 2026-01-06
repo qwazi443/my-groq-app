@@ -31,7 +31,7 @@ const SCALES = ['Minor', 'Phrygian', 'Dorian', 'Major', 'Harmonic Minor'];
 const PRODUCER_STYLES = ['Tidy Trax', 'Vicious Circle', 'Nukleuz', 'Paul Glazby', 'Andy Farley', 'Lisa Lashes', 'BK', 'Tony De Vit'];
 const DEFAULT_BPM = 150; 
 
-// Note: basePitch is crucial for calculating the shift. Assuming samples are tuned to C.
+// TUNING FIX: Set basePitch to C4 for leads (Standard) and C2 for Bass
 const INSTRUMENT_PRESETS = [
   { id: 'kick', name: '909 Kick', icon: Disc, pitch: 'C2', basePitch: 'C2', file: 'kick1.wav', desc: 'Punchy 909 Kick' },
   { id: 'clap', name: 'Sharp Clap', icon: Music, pitch: 'D#2', basePitch: 'D#2', file: 'clap1.wav', desc: 'Classic Handclap' },
@@ -40,7 +40,7 @@ const INSTRUMENT_PRESETS = [
   { id: 'hat_closed', name: '909 Closed', icon: Disc, pitch: 'G#2', basePitch: 'G#2', file: 'hat_closed1.wav', desc: 'Driving 16th Hats' },
   { id: 'bass', name: 'Donk Bass', icon: Activity, pitch: 'D3', basePitch: 'C2', file: 'bass1.wav', desc: 'FM Donk / Offbeat Bass' }, 
   { id: 'lead', name: 'Alpha Hoover', icon: Zap, pitch: 'C4', basePitch: 'C4', file: 'lead1.wav', desc: 'Massive Pitch-Ramp Saw' },
-  { id: 'hoover', name: 'Acid Screech', icon: Disc, pitch: 'F3', basePitch: 'C3', file: 'hoover1.wav', desc: 'Distorted 303 Square' },
+  { id: 'hoover', name: 'Acid Screech', icon: Disc, pitch: 'F3', basePitch: 'C4', file: 'hoover1.wav', desc: 'Distorted 303 Square' },
 ];
 
 const PROMPT_EXAMPLES = [
@@ -141,7 +141,7 @@ function makeDistortionCurve(amount) {
   return curve;
 }
 
-// --- AUDIO ENGINE (V22.0 - PITCH FIX) ---
+// --- AUDIO ENGINE (V23.0 - HIGH FIDELITY) ---
 class AudioEngine {
   constructor(onStatusUpdate, onSampleStatus) {
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -149,7 +149,7 @@ class AudioEngine {
     this.masterGain.gain.value = 0.5;
     
     this.compressor = this.ctx.createDynamicsCompressor();
-    this.compressor.threshold.value = -12;
+    this.compressor.threshold.value = -10; // Loosened threshold for dynamic range
     this.masterGain.connect(this.compressor);
     this.compressor.connect(this.ctx.destination);
     
@@ -161,7 +161,6 @@ class AudioEngine {
 
     this.buffers = {};
     this.activeNodes = []; 
-    // Store base pitches for calculation
     this.basePitches = {};
     
     this.onStatusUpdate = onStatusUpdate || console.log;
@@ -190,7 +189,6 @@ class AudioEngine {
 
   async loadBank(presets) {
     const promises = presets.map(async (inst) => {
-      // Save base pitch for later math
       this.basePitches[inst.id] = inst.basePitch || 'C3';
 
       if (!inst.file) return;
@@ -210,10 +208,8 @@ class AudioEngine {
             this.onSampleStatus(inst.id, { status: 'loading', url: fullPath });
             const response = await fetch(fullPath);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            
             const type = response.headers.get("content-type");
             if (type && type.includes("text/html")) throw new Error("HTML (404)");
-
             const arrayBuffer = await response.arrayBuffer();
             if (arrayBuffer.byteLength < 1000) throw new Error("Too small"); 
 
@@ -235,13 +231,11 @@ class AudioEngine {
   }
 
   playNote(instId, pitch, time, duration, velocity = 100) {
-    // 1. PLAY SAMPLE IF AVAILABLE
     if (this.buffers[instId]) {
-      this.playSample(instId, pitch, time, velocity); // PASS PITCH NOW!
+      this.playSample(instId, pitch, time, velocity); 
       return;
     }
 
-    // 2. FALLBACK TO SYNTH
     if (this.allowSynths) {
       this.playSynth(instId, pitch, time, duration, velocity);
     }
@@ -258,32 +252,25 @@ class AudioEngine {
     const source = this.ctx.createBufferSource();
     source.buffer = this.buffers[id];
     
-    // --- PITCH SHIFTING LOGIC ---
-    // 1. Get MIDI numbers
+    // Pitch Logic
     const targetMidi = noteToMidiNum(targetPitchStr);
     const baseMidi = noteToMidiNum(this.basePitches[id] || 'C3');
-    
-    // 2. Calculate semitone difference
-    const semitoneDiff = targetMidi - baseMidi;
-    
-    // 3. Convert to playback rate: rate = 2 ^ (semitones / 12)
-    // Example: +12 semitones = 2.0 speed (1 octave up)
-    const playbackRate = Math.pow(2, semitoneDiff / 12);
-    
-    // 4. Apply
+    const playbackRate = Math.pow(2, (targetMidi - baseMidi) / 12);
     source.playbackRate.value = playbackRate;
-    // ---------------------------
 
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(velocity / 127, time);
     
-    // Adjust tail length based on speed (faster sample = shorter time)
-    let duration = source.buffer.duration / playbackRate;
+    const duration = source.buffer.duration / playbackRate;
     
-    // Force short decay for bass/kick to keep it tight
-    if (id === 'bass' || id === 'kick') {
-        gain.gain.exponentialRampToValueAtTime(0.01, time + (duration * 0.8));
+    // --- HIGH FIDELITY ENVELOPES ---
+    if (id === 'lead' || id === 'hoover') {
+        // SUSTAIN ENVELOPE (Plays full sample for leads)
+        gain.gain.setValueAtTime(velocity / 127, time);
+        gain.gain.linearRampToValueAtTime(velocity / 127, time + duration - 0.05); // Hold volume
+        gain.gain.linearRampToValueAtTime(0, time + duration); // Quick fade at very end
     } else {
+        // PLUCK ENVELOPE (Good for drums/bass)
         gain.gain.exponentialRampToValueAtTime(0.01, time + duration);
     }
 
@@ -499,6 +486,7 @@ function HardHouseGenerator() {
       if (window.HARDHOUSE_AUDIO) window.HARDHOUSE_AUDIO.setAllowSynths(allowSynths);
   }, [allowSynths]);
 
+  // VISUALIZER
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !window.HARDHOUSE_AUDIO) return;
@@ -675,7 +663,7 @@ function HardHouseGenerator() {
             </h1>
             <div className="flex items-center gap-2 text-[#39FF14] font-mono text-xs uppercase mt-2">
               <div className={`h-2 w-2 rounded-full ${audioStatus === 'Ready' ? 'bg-[#39FF14]' : 'bg-red-500 animate-pulse'}`} />
-              <span>v22.0 Pitch Perfect</span>
+              <span>v23.0 High Fidelity</span>
             </div>
           </div>
           <div className="flex gap-2">
@@ -694,7 +682,6 @@ function HardHouseGenerator() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <section className="lg:col-span-4 space-y-6">
-             {/* PRODUCER CONTROLS */}
              <div className="bg-[#0A0A0A] border border-white/10 rounded-xl p-6 relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-1 h-full bg-[#39FF14]" />
                 <div className="flex items-center gap-2 mb-6 text-gray-400 text-xs font-black uppercase tracking-widest">
@@ -768,7 +755,6 @@ function HardHouseGenerator() {
                 <div onClick={(e) => handlePreview(inst.id, e)} className="absolute top-2 right-2 p-1 bg-black/50 hover:bg-white text-white hover:text-black rounded-full z-10">
                     <Volume1 size={12} />
                 </div>
-                {/* STATUS DOT */}
                 <div className={`absolute top-2 left-2 w-2 h-2 rounded-full ${sampleStatus[inst.id]?.status === 'success' ? 'bg-[#39FF14]' : sampleStatus[inst.id]?.status === 'error' ? 'bg-[#FF00FF]' : 'bg-gray-600'}`} />
                 <inst.icon size={24} />
                 <span className="text-[10px] font-bold uppercase tracking-widest">{inst.name}</span>
