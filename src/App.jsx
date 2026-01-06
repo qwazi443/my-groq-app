@@ -38,12 +38,6 @@ const MELODY_LIB = [
   { name: 'Siren', pattern: [0, 0, 0, 0], rhythm: 'OFFBEAT' },
   { name: 'Arp Up', pattern: [0, 2, 4, 7, 12, 7, 4, 2], rhythm: 'SPEED' },
   { name: 'Acid Walk', pattern: [0, -1, 0, 2, 0, -2, 0, 5], rhythm: 'ROLLING' },
-  { name: 'Stabber', pattern: [0, 12], rhythm: 'TECH' },
-  { name: 'Euphoria', pattern: [0, 2, 4, 5, 7, 9, 7, 5], rhythm: 'GALLOP' },
-  { name: 'Darkness', pattern: [0, 1, 0, 1, 0, 3, 0, 1], rhythm: 'ROLLING' },
-  { name: 'The Alarm', pattern: [12, 12, 0, 0], rhythm: 'OFFBEAT' },
-  { name: 'Trance Gate', pattern: [0, 4, 7, 12], rhythm: 'SPEED' },
-  { name: 'Minimal', pattern: [0, 7], rhythm: 'BROKEN' },
 ];
 
 // --- UTILS ---
@@ -130,7 +124,6 @@ class AudioEngine {
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 0.5;
     
-    // Signal Chain
     this.compressor = this.ctx.createDynamicsCompressor();
     this.compressor.threshold.value = -10;
     this.compressor.ratio.value = 4;
@@ -138,13 +131,11 @@ class AudioEngine {
     this.masterGain.connect(this.compressor);
     this.compressor.connect(this.ctx.destination);
     
-    // Visualizer
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 512;
     this.masterGain.connect(this.analyser);
 
     this.buffers = {};
-    this.activeNodes = []; 
     this.onStatusUpdate = onStatusUpdate || console.log;
   }
 
@@ -152,21 +143,6 @@ class AudioEngine {
     if (this.ctx.state === 'suspended') {
       await this.ctx.resume();
     }
-  }
-
-  // FORCE STOP
-  stopAll() {
-    this.activeNodes.forEach(node => {
-      try { node.stop(); } catch(e) {}
-    });
-    this.activeNodes = [];
-  }
-
-  registerNode(node) {
-    this.activeNodes.push(node);
-    node.onended = () => {
-      this.activeNodes = this.activeNodes.filter(n => n !== node);
-    };
   }
 
   async loadBank(presets) {
@@ -208,9 +184,7 @@ class AudioEngine {
 
     source.connect(gain);
     gain.connect(this.masterGain);
-    
     source.start(time);
-    this.registerNode(source);
   }
 
   playSynth(instId, pitch, time, duration, velocity) {
@@ -232,7 +206,6 @@ class AudioEngine {
     g.gain.exponentialRampToValueAtTime(0.01, time + 0.5);
     osc.connect(g).connect(this.masterGain);
     osc.start(time); osc.stop(time + 0.5);
-    this.registerNode(osc);
   }
 
   synthBass(pitch, time, dur, vel) {
@@ -253,7 +226,6 @@ class AudioEngine {
     
     osc.connect(filter).connect(g).connect(this.masterGain);
     osc.start(time); osc.stop(time + dur);
-    this.registerNode(osc);
   }
   
   synthLead(pitch, time, dur, vel) {
@@ -266,7 +238,6 @@ class AudioEngine {
     g.gain.linearRampToValueAtTime(0, time + dur);
     osc.connect(g).connect(this.masterGain);
     osc.start(time); osc.stop(time + dur);
-    this.registerNode(osc);
   }
 
   synthHat(time, isOpen, vel) {
@@ -287,7 +258,6 @@ class AudioEngine {
     
     noise.connect(filter).connect(g).connect(this.masterGain);
     noise.start(time);
-    this.registerNode(noise);
   }
   
   synthClap(time, vel) {
@@ -309,8 +279,11 @@ export default function HardHouseGenerator() {
   const [errorMsg, setErrorMsg] = useState('');
   const [audioStatus, setAudioStatus] = useState('Initializing...');
 
+  // --- THE MASTER SWITCH (Prevents Echo) ---
+  const isPlayingRef = useRef(false);
   const canvasRef = useRef(null);
 
+  // --- GLOBAL INIT ---
   useEffect(() => {
     if (!window.HARDHOUSE_AUDIO) {
       window.HARDHOUSE_AUDIO = new AudioEngine((status) => setAudioStatus(status));
@@ -320,6 +293,7 @@ export default function HardHouseGenerator() {
     }
   }, []);
 
+  // Visualizer Loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !window.HARDHOUSE_AUDIO) return;
@@ -353,19 +327,11 @@ export default function HardHouseGenerator() {
     return () => cancelAnimationFrame(animationId);
   }, [isPlaying]);
 
-  const stopPlayback = useCallback(() => {
-    if (window.HARDHOUSE_TIMER) {
-        clearTimeout(window.HARDHOUSE_TIMER);
-        window.HARDHOUSE_TIMER = null;
-    }
-    // Kill the audio engine nodes immediately
-    if (window.HARDHOUSE_AUDIO) {
-        window.HARDHOUSE_AUDIO.stopAll();
-    }
-    setIsPlaying(false);
-  }, []);
-
+  // --- RECURSIVE LOOP (GUARDED) ---
   const scheduleLoop = useCallback((notes) => {
+    // 1. THE KILL SWITCH: If this is false, STOP IMMEDIATELY.
+    if (!isPlayingRef.current) return;
+
     if (!window.HARDHOUSE_AUDIO || !window.HARDHOUSE_AUDIO.ctx) return;
     const ctx = window.HARDHOUSE_AUDIO.ctx;
     
@@ -380,9 +346,17 @@ export default function HardHouseGenerator() {
       window.HARDHOUSE_AUDIO.playNote(n.instId, n.pitch, start, dur, n.velocity || 100);
     });
 
-    window.HARDHOUSE_TIMER = setTimeout(() => scheduleLoop(notes), (16 * step) * 1000);
+    setTimeout(() => scheduleLoop(notes), (16 * step) * 1000);
   }, [bpm]);
 
+  // --- STOP LOGIC ---
+  const stopPlayback = useCallback(() => {
+    // Flip the switch immediately
+    isPlayingRef.current = false;
+    setIsPlaying(false);
+  }, []);
+
+  // --- CHAOS MODE ---
   const generateLocalPattern = () => {
     const notes = [];
     const leadBase = pickRandom(MELODY_LIB);
@@ -414,20 +388,18 @@ export default function HardHouseGenerator() {
   };
 
   const handleLaunch = async () => {
-    // --- TOGGLE LOGIC FIXED HERE ---
+    // TOGGLE OFF
     if (isPlaying) { 
       stopPlayback(); 
       return; 
     }
 
-    if (window.HARDHOUSE_TIMER) {
-        clearTimeout(window.HARDHOUSE_TIMER);
-        window.HARDHOUSE_TIMER = null;
-    }
-
+    // TOGGLE ON
     if (!window.HARDHOUSE_AUDIO) return;
     await window.HARDHOUSE_AUDIO.resume();
 
+    // 1. FLIP THE MASTER SWITCH ON
+    isPlayingRef.current = true;
     setErrorMsg('');
 
     if (prompt.trim()) {
@@ -520,7 +492,7 @@ export default function HardHouseGenerator() {
           <div className="flex justify-center items-center gap-4 text-[#39FF14] font-bold tracking-[0.5em] text-xs uppercase">
             <span className="animate-flicker">Status: {audioStatus}</span>
             <div className={`h-2 w-2 rounded-full ${audioStatus === 'Ready' ? 'bg-[#39FF14]' : 'bg-red-500 animate-pulse'}`} />
-            <span>Ver 3.2 (Stop Button Fixed)</span>
+            <span>Ver 5.0 (Final)</span>
           </div>
         </header>
 
