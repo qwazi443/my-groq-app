@@ -3,33 +3,27 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Download, Wand2, Zap, Disc, Music, Drum, Speaker, Volume2, Activity, AlertCircle, Play, Square } from 'lucide-react';
 
-// --- CONSTANTS (UK HARD HOUSE / NRG SPECIFIC) ---
+// --- CONSTANTS ---
 const KEYS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-
-// "Muish Theory" Scales: Dark, driving, and aggressive.
 const SCALES = ['Minor', 'Phrygian', 'Dorian']; 
-
 const PRODUCER_STYLES = ['Tidy Trax', 'Vicious Circle', 'Nukleuz', 'Paul Glazby', 'Andy Farley', 'Lisa Lashes', 'BK', 'Tony De Vit'];
-
-// Hard House typically sits at 145-155 BPM
 const DEFAULT_BPM = 150; 
 
 const INSTRUMENT_PRESETS = [
-  { id: 'kick', name: '909 Kick', icon: Drum, pitch: 'C2', file: 'kick1.wav' },
+  { id: 'kick', name: 'Kick', icon: Drum, pitch: 'C2', file: 'kick1.wav' },
   { id: 'clap', name: 'Sharp Clap', icon: Music, pitch: 'D#2', file: 'clap1.wav' },
-  { id: 'snare', name: 'Snare Roll', icon: Speaker, pitch: 'D2', file: 'snare1.wav' },
-  { id: 'hat_open', name: '909 Open', icon: Volume2, pitch: 'F#2', file: 'hat_open1.wav' },
-  { id: 'hat_closed', name: '909 Closed', icon: Disc, pitch: 'G#2', file: 'hat_closed1.wav' },
-  { id: 'bass', name: 'Donk/Offbeat', icon: Activity, pitch: 'D3', file: 'bass1.wav' }, 
-  { id: 'lead', name: 'Hoover/Acid', icon: Zap, pitch: 'C4', file: 'lead1.wav' },
+  { id: 'snare', name: 'Snare', icon: Speaker, pitch: 'D2', file: 'snare1.wav' },
+  { id: 'hat_open', name: 'Open HiHat', icon: Volume2, pitch: 'F#2', file: 'hat_open1.wav' },
+  { id: 'hat_closed', name: 'Closed HiHat', icon: Disc, pitch: 'G#2', file: 'hat_closed1.wav' },
+  { id: 'bass', name: 'Bass', icon: Activity, pitch: 'D3', file: 'bass1.wav' }, 
+  { id: 'lead', name: 'Lead/Acid', icon: Zap, pitch: 'C4', file: 'lead1.wav' },
   { id: 'stabs', name: 'Rave Stabs', icon: Activity, pitch: 'C3', file: 'stabs1.wav' },
-  { id: 'hoover', name: 'Screech', icon: Disc, pitch: 'F3', file: 'hoover1.wav' },
+  { id: 'hoover', name: 'Hoover', icon: Disc, pitch: 'F3', file: 'hoover1.wav' },
 ];
 
 const RHYTHM_LIB = {
-  // "Muish Theory" Rhythms
-  OFFBEAT: [2, 6, 10, 14], // The "Golden Rule" of Hard House Bass
-  GALLOP: [0, 2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15], // The "Horse" gallop for leads
+  OFFBEAT: [2, 6, 10, 14], 
+  GALLOP: [0, 2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15], 
   ROLLING: [0, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15],
   DEMENTED: [0, 3, 6, 8, 11, 14],
   BROKEN: [0, 3, 8, 11, 14],
@@ -61,9 +55,9 @@ const noteToMidiNum = (noteStr) => {
 const noteFromScale = (root, scale, degree, octave) => {
   const intervals = {
     Major: [0, 2, 4, 5, 7, 9, 11],
-    Minor: [0, 2, 3, 5, 7, 8, 10], // Standard
-    Phrygian: [0, 1, 3, 5, 7, 8, 10], // Acid / Dark
-    Dorian: [0, 2, 3, 5, 7, 9, 10],   // Funky / Hard House
+    Minor: [0, 2, 3, 5, 7, 8, 10], 
+    Phrygian: [0, 1, 3, 5, 7, 8, 10], 
+    Dorian: [0, 2, 3, 5, 7, 9, 10],   
   }[scale] || [0, 2, 3, 5, 7, 8, 10];
 
   const rootIndex = KEYS.indexOf(root);
@@ -129,11 +123,10 @@ class AudioEngine {
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 0.5;
     
-    // HARD COMPRESSION (The "Pump")
     this.compressor = this.ctx.createDynamicsCompressor();
     this.compressor.threshold.value = -15;
     this.compressor.knee.value = 5;
-    this.compressor.ratio.value = 10; // High ratio for aggressive squash
+    this.compressor.ratio.value = 10;
     this.compressor.attack.value = 0.005;
     this.compressor.release.value = 0.1;
     
@@ -163,11 +156,8 @@ class AudioEngine {
 
   kill() {
     const now = this.ctx.currentTime;
-    // 1. INSTANT SILENCE to stop "ghost echoes"
     this.masterGain.gain.cancelScheduledValues(now);
     this.masterGain.gain.setValueAtTime(0, now);
-    
-    // 2. FORCE STOP OSCILLATORS
     if (this.activeBassNode) { try{this.activeBassNode.stop();}catch(e){} this.activeBassNode = null; }
     if (this.activeKickNode) { try{this.activeKickNode.stop();}catch(e){} this.activeKickNode = null; }
     if (this.activeLeadNode) { try{this.activeLeadNode.stop();}catch(e){} this.activeLeadNode = null; }
@@ -197,15 +187,15 @@ class AudioEngine {
 
   playNote(instId, pitch, time, duration, velocity = 100) {
     // 1. TIGHT MONOPHONIC CUTOFFS (NRG Style)
-    // Prevents muddy mix by killing previous notes
     if (instId === 'bass' && this.activeBassNode) try { this.activeBassNode.stop(time); } catch(e){}
     if (instId === 'kick' && this.activeKickNode) try { this.activeKickNode.stop(time); } catch(e){}
     if (instId === 'lead' && this.activeLeadNode) try { this.activeLeadNode.stop(time); } catch(e){}
     
+    // 2. CHECK FOR SAMPLE FIRST
     if (this.buffers[instId]) {
       this.playSample(instId, time, velocity);
     } else {
-      // Use the improved specialized synths
+      // Fallback to synth if sample missing (or lead1.wav is 404)
       this.playSynth(instId, pitch, time, duration, velocity);
     }
   }
@@ -221,11 +211,10 @@ class AudioEngine {
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(velocity / 127, time);
     
-    // ADJUST TAILS FOR GENRE (Tightness is key)
     let tail = source.buffer.duration;
-    if (id === 'bass') tail = 0.25; // Short, punchy bass
-    if (id === 'kick') tail = 0.3;  // Tight kick
-    if (id === 'hat_open') tail = 0.15; // Tight open hat
+    if (id === 'bass') tail = 0.25; 
+    if (id === 'kick') tail = 0.3;  
+    if (id === 'hat_open') tail = 0.15; 
     
     gain.gain.exponentialRampToValueAtTime(0.01, time + tail);
 
@@ -238,8 +227,8 @@ class AudioEngine {
     const vel = velocity / 127;
     
     if (instId === 'kick') this.synthKick(time, vel);
-    else if (instId === 'bass') this.synthDonk(pitch, time, duration, vel); // NEW DONK
-    else if (instId === 'lead') this.synthHoover(pitch, time, duration, vel); // NEW HOOVER
+    else if (instId === 'bass') this.synthDonk(pitch, time, duration, vel); 
+    else if (instId === 'lead') this.synthHoover(pitch, time, duration, vel);
     else if (instId.includes('hat')) this.synthHat(time, instId === 'hat_open', vel);
     else if (instId === 'clap') this.synthClap(time, vel);
   }
@@ -247,7 +236,6 @@ class AudioEngine {
   // --- UK HARD HOUSE SYNTHESIS MODELS ---
 
   synthKick(time, vel) {
-    // 909-ish Punch
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
     osc.frequency.setValueAtTime(150, time);
@@ -259,55 +247,48 @@ class AudioEngine {
   }
 
   synthDonk(pitch, time, dur, vel) {
-    // THE "DONK" (FM Synthesis - Essential for Tidy Trax Style)
-    // Carrier
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
-    osc.type = 'square'; // Square wave for hollow sound
+    osc.type = 'square'; 
     const freq = 440 * Math.pow(2, (noteToMidiNum(pitch) - 69) / 12);
     osc.frequency.setValueAtTime(freq, time);
     
-    // Filter (The "Pluck")
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(freq * 8, time); // Start bright
-    filter.frequency.exponentialRampToValueAtTime(freq, time + 0.15); // Quick snap down
-    filter.Q.value = 5; // Resonance for the "donk"
+    filter.frequency.setValueAtTime(freq * 8, time); 
+    filter.frequency.exponentialRampToValueAtTime(freq, time + 0.15); 
+    filter.Q.value = 5; 
 
     this.activeBassNode = osc;
 
     g.gain.setValueAtTime(vel, time);
-    g.gain.exponentialRampToValueAtTime(0.01, time + 0.25); // Short decay
+    g.gain.exponentialRampToValueAtTime(0.01, time + 0.25); 
     
     osc.connect(filter).connect(g).connect(this.masterGain);
     osc.start(time); osc.stop(time + 0.25);
   }
   
   synthHoover(pitch, time, dur, vel) {
-    // THE "HOOVER" (Pitch Envelope + Saw)
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
     osc.type = 'sawtooth';
     
     const targetFreq = 440 * Math.pow(2, (noteToMidiNum(pitch) - 69) / 12);
     
-    // Pitch Envelope (The "Vacuum" effect)
-    osc.frequency.setValueAtTime(targetFreq * 0.8, time); // Start low
-    osc.frequency.linearRampToValueAtTime(targetFreq, time + 0.1); // Slide up fast
+    osc.frequency.setValueAtTime(targetFreq * 0.8, time); 
+    osc.frequency.linearRampToValueAtTime(targetFreq, time + 0.1); 
     
-    // Pulse Width Modulation simulation (Chorus effect)
     const osc2 = this.ctx.createOscillator();
     osc2.type = 'sawtooth';
-    osc2.frequency.setValueAtTime(targetFreq * 1.01, time); // Slightly detuned
+    osc2.frequency.setValueAtTime(targetFreq * 1.01, time); 
 
     this.activeLeadNode = osc;
-    // We actually need to track both for a true kill, but limiting to main for now to save CPU
 
     g.gain.setValueAtTime(vel * 0.4, time);
-    g.gain.linearRampToValueAtTime(0, time + dur); // Sustain
+    g.gain.linearRampToValueAtTime(0, time + dur); 
     
     osc.connect(g).connect(this.masterGain);
-    osc2.connect(g); // Connect detuned osc
+    osc2.connect(g); 
     osc.start(time); osc.stop(time + dur);
     osc2.start(time); osc2.stop(time + dur);
   }
@@ -420,12 +401,11 @@ export default function HardHouseGenerator() {
   const stopPlayback = useCallback(() => {
     isPlayingRef.current = false;
     setIsPlaying(false);
-    // CALL THE KILL SWITCH
     if (window.HARDHOUSE_AUDIO) window.HARDHOUSE_AUDIO.kill();
   }, []);
 
   // --- CHAOS MODE (FALLBACK) ---
-  const generateLocalPattern = () => {
+  const generateLocalPattern = (instrumentsToUse) => {
     const notes = [];
     // MUISH THEORY: Enforce Offbeat Bass (The Golden Rule)
     const bassRhythm = RHYTHM_LIB.OFFBEAT; 
@@ -435,24 +415,24 @@ export default function HardHouseGenerator() {
 
     for (let step = 0; step < 16; step++) {
       // Kick: Four to the floor (0, 4, 8, 12)
-      if (selectedInstruments.includes('kick') && step % 4 === 0) {
+      if (instrumentsToUse.includes('kick') && step % 4 === 0) {
         notes.push({ instId: 'kick', pitch: 'C2', duration: '1', velocity: 127, startTick: step * 128 });
       }
       
       // Bass: Strictly Offbeat (Don't clash with Kick)
-      if (selectedInstruments.includes('bass') && bassRhythm.includes(step)) {
+      if (instrumentsToUse.includes('bass') && bassRhythm.includes(step)) {
         notes.push({ instId: 'bass', pitch: noteFromScale(selectedKey, selectedScale, 0, 2), duration: '2', velocity: 110, startTick: step * 128 });
       }
       
       // Lead: Melody
-      if (selectedInstruments.includes('lead') && leadRhythm.includes(step)) {
+      if (instrumentsToUse.includes('lead') && leadRhythm.includes(step)) {
         // Simple arpeggio logic
         const degree = [0, 2, 4, 7][step % 4]; 
         notes.push({ instId: 'lead', pitch: noteFromScale(selectedKey, selectedScale, degree, 4), duration: '2', velocity: 100, startTick: step * 128 });
       }
       
       // Hats: Offbeat
-      if (selectedInstruments.includes('hat_open') && step % 4 === 2) {
+      if (instrumentsToUse.includes('hat_open') && step % 4 === 2) {
         notes.push({ instId: 'hat_open', pitch: 'F#2', duration: '2', velocity: 90, startTick: step * 128 });
       }
     }
@@ -471,6 +451,11 @@ export default function HardHouseGenerator() {
     isPlayingRef.current = true;
     setErrorMsg('');
 
+    // --- CRITICAL FIX: "USE ALL" if nothing selected ---
+    const instrumentsToUse = selectedInstruments.length > 0 
+      ? selectedInstruments 
+      : INSTRUMENT_PRESETS.map(i => i.id);
+
     if (prompt.trim()) {
       setIsGenerating(true);
       try {
@@ -484,7 +469,7 @@ export default function HardHouseGenerator() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
             prompt: variedPrompt, 
-            instruments: selectedInstruments, 
+            instruments: instrumentsToUse, 
             key: selectedKey, 
             scale: selectedScale, 
             bpm 
@@ -502,7 +487,7 @@ export default function HardHouseGenerator() {
             duration: n.duration || '2',
             velocity: n.velocity || 100,
             startTick: (n.step || 0) * 128
-          })).filter((n) => selectedInstruments.includes(n.instId));
+          })).filter((n) => instrumentsToUse.includes(n.instId));
 
           setCurrentPattern(aiNotes);
           setIsPlaying(true);
@@ -511,7 +496,7 @@ export default function HardHouseGenerator() {
       } catch (error) {
         console.warn("AI Generation failed, falling back to local chaos.", error);
         setErrorMsg('AI Offline - Using Tidy Mode');
-        const notes = generateLocalPattern(); 
+        const notes = generateLocalPattern(instrumentsToUse); 
         setCurrentPattern(notes);
         setIsPlaying(true);
         scheduleLoop(notes);
@@ -520,7 +505,8 @@ export default function HardHouseGenerator() {
       }
     } 
     else {
-      const notes = generateLocalPattern();
+      // PROMPT IS EMPTY: Just run the chaos generator with everything
+      const notes = generateLocalPattern(instrumentsToUse);
       setCurrentPattern(notes);
       setIsPlaying(true);
       scheduleLoop(notes);
@@ -566,7 +552,7 @@ export default function HardHouseGenerator() {
           <div className="flex justify-center items-center gap-4 text-[#39FF14] font-bold tracking-[0.5em] text-xs uppercase">
             <span className="animate-flicker">Status: {audioStatus}</span>
             <div className={`h-2 w-2 rounded-full ${audioStatus === 'Ready' ? 'bg-[#39FF14]' : 'bg-red-500 animate-pulse'}`} />
-            <span>Ver 7.0 (Muish Edition)</span>
+            <span>Ver 8.0 (Robust)</span>
           </div>
         </header>
 
