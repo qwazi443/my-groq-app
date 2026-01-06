@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Download, Wand2, Zap, Disc, Music, Drum, Speaker, Volume2, Activity, AlertCircle, Play, Square, Info, Sliders, HelpCircle, X, Dice5, Volume1, Settings, Package } from 'lucide-react';
-import JSZip from 'jszip'; // NEW: Import Zip Library
+import JSZip from 'jszip'; 
 
 // --- CONSTANTS ---
 const KEYS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -19,6 +19,7 @@ const INSTRUMENT_PRESETS = [
   { id: 'bass', name: 'Donk Bass', icon: Activity, pitch: 'D3', file: 'bass1.wav', desc: 'FM Donk / Offbeat Bass' }, 
   { id: 'lead', name: 'Alpha Hoover', icon: Zap, pitch: 'C4', file: 'lead1.wav', desc: 'Massive Pitch-Ramp Saw' },
   { id: 'hoover', name: 'Acid Screech', icon: Disc, pitch: 'F3', file: 'hoover1.wav', desc: 'Distorted 303 Square' },
+  { id: 'stabs', name: 'Rave Stabs', icon: Activity, pitch: 'C3', file: 'stabs1.wav', desc: 'Retro Chord Hits' },
 ];
 
 const PROMPT_EXAMPLES = [
@@ -100,10 +101,7 @@ function writeMidiFile(notes) {
     trackData.push(status, e.note, e.velocity);
   });
   
-  // End of Track
   trackData.push(0x00, 0xff, 0x2f, 0x00);
-
-  // Track Length
   const len = trackData.length;
   data.push((len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff);
   data.push(...trackData);
@@ -124,7 +122,7 @@ function makeDistortionCurve(amount) {
   return curve;
 }
 
-// --- UK HARD HOUSE AUDIO ENGINE (V14.0) ---
+// --- UK HARD HOUSE AUDIO ENGINE (V15.1 - FIXED) ---
 class AudioEngine {
   constructor(onStatusUpdate) {
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -180,7 +178,7 @@ class AudioEngine {
         const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
         this.buffers[inst.id] = audioBuffer;
       } catch (e) {
-        // Silent fail
+        console.warn(`Sample fallback for: ${inst.id}`);
       }
     });
     await Promise.all(promises);
@@ -188,14 +186,18 @@ class AudioEngine {
   }
 
   playNote(instId, pitch, time, duration, velocity = 100) {
-    if (instId === 'lead' || instId === 'hoover' || instId === 'stabs') {
+    // 1. FORCE SYNTH FOR LEAD & HOOVER ONLY (Ensure quality)
+    // Removed 'stabs' so it tries to play the sample first
+    if (instId === 'lead' || instId === 'hoover') {
        this.playSynth(instId, pitch, time, duration, velocity);
        return; 
     }
     
+    // 2. CHECK FOR SAMPLE
     if (this.buffers[instId]) {
       this.playSample(instId, time, velocity);
     } else {
+      // 3. FALLBACK TO SYNTH
       this.playSynth(instId, pitch, time, duration, velocity);
     }
   }
@@ -237,6 +239,8 @@ class AudioEngine {
     else if (instId === 'hoover') this.synthAcidScreech(pitch, time, duration, vel); 
     else this.synthHat(time, instId.includes('open'), vel);
   }
+
+  // --- SYNTH MODELS ---
 
   synthKick(time, vel) {
     const osc = this.ctx.createOscillator();
@@ -513,6 +517,12 @@ export default function HardHouseGenerator() {
          }
       }
 
+      if (instrumentsToUse.includes('stabs') && density > 0.6 && [0, 4, 8, 12].includes(step)) {
+         if(Math.random() > 0.7) {
+             notes.push({ instId: 'stabs', pitch: noteFromScale(selectedKey, selectedScale, 0, 3), duration: '2', velocity: getVel(90), startTick: step * 128 });
+         }
+      }
+
       if (instrumentsToUse.includes('hat_open') && step % 4 === 2) {
         notes.push({ instId: 'hat_open', pitch: 'F#2', duration: '2', velocity: getVel(100), startTick: step * 128 });
       }
@@ -610,7 +620,7 @@ export default function HardHouseGenerator() {
               <div className={`h-2 w-2 rounded-full ${audioStatus === 'Ready' ? 'bg-[#39FF14]' : 'bg-red-500 animate-pulse'}`} />
               <span>System: {audioStatus}</span>
               <span className="text-gray-500">|</span>
-              <span>v15.0 Zip Edition</span>
+              <span>v15.1 Fixed</span>
             </div>
           </div>
           <button 
