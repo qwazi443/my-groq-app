@@ -7,27 +7,27 @@ import JSZip from 'jszip';
 // --- CONSTANTS ---
 const KEYS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const SCALES = ['Minor', 'Phrygian', 'Dorian', 'Major', 'Harmonic Minor']; 
-const PRODUCER_STYLES = ['Tidy Trax', 'Vicious Circle', 'Nukleuz', 'Paul Glazby', 'Andy Farley', 'Lisa Lashes', 'BK', 'Tony De Vit'];
+const PRODUCER_STYLES = ['Generic', 'Tidy Trax', 'Vicious Circle', 'Nukleuz', 'Paul Glazby', 'Andy Farley', 'Lisa Lashes', 'BK', 'Tony De Vit'];
 const DEFAULT_BPM = 150; 
 
 const INSTRUMENT_PRESETS = [
-  { id: 'kick', name: '909 Kick', icon: Drum, pitch: 'C2', file: 'kick1.wav', desc: 'Punchy 909 Kick (On-beat)' },
+  { id: 'kick', name: 'Kick', icon: Drum, pitch: 'C2', file: 'kick1.wav', desc: 'Punchy 909 Kick (On-beat)' },
   { id: 'clap', name: 'Sharp Clap', icon: Music, pitch: 'D#2', file: 'clap1.wav', desc: 'Classic Handclap' },
-  { id: 'snare', name: 'Snare Roll', icon: Speaker, pitch: 'D2', file: 'snare1.wav', desc: 'Rapid Snare Fills' },
-  { id: 'hat_open', name: '909 Open', icon: Volume2, pitch: 'F#2', file: 'hat_open1.wav', desc: 'Offbeat Hi-Hat' },
-  { id: 'hat_closed', name: '909 Closed', icon: Disc, pitch: 'G#2', file: 'hat_closed1.wav', desc: 'Driving 16th Hats' },
-  { id: 'bass', name: 'Donk Bass', icon: Activity, pitch: 'D3', file: 'bass1.wav', desc: 'FM Donk / Offbeat Bass' }, 
-  { id: 'lead', name: 'Alpha Hoover', icon: Zap, pitch: 'C4', file: 'lead1.wav', desc: 'Massive Pitch-Ramp Saw' },
-  { id: 'hoover', name: 'Acid Screech', icon: Disc, pitch: 'F3', file: 'hoover1.wav', desc: 'Distorted 303 Square' },
+  { id: 'snare', name: 'Snare', icon: Speaker, pitch: 'D2', file: 'snare1.wav', desc: 'Rapid Snare Fills' },
+  { id: 'hat_open', name: 'Open HiHats', icon: Volume2, pitch: 'F#2', file: 'hat_open1.wav', desc: 'Offbeat Hi-Hat' },
+  { id: 'hat_closed', name: 'Closed HiHats', icon: Disc, pitch: 'G#2', file: 'hat_closed1.wav', desc: 'Driving 16th Hats' },
+  { id: 'bass', name: 'Bass', icon: Activity, pitch: 'D3', file: 'bass1.wav', desc: 'FM Donk / Offbeat Bass' }, 
+  { id: 'lead', name: 'Lead', icon: Zap, pitch: 'C4', file: 'lead1.wav', desc: 'Massive Pitch-Ramp Saw' },
+  { id: 'hoover', name: 'Hoover', icon: Disc, pitch: 'F3', file: 'hoover1.wav', desc: 'Distorted 303 Square' },
   { id: 'stabs', name: 'Rave Stabs', icon: Activity, pitch: 'C3', file: 'stabs1.wav', desc: 'Retro Chord Hits' },
 ];
 
 const PROMPT_EXAMPLES = [
-  "Hard energy build-up with rolling acid line",
-  "Dark bouncy offbeat donk drop",
-  "Euphoric trance breakdown into hard kick",
+  "Hard NRG build-up with rolling acid line",
+  "Bouncy offbeat donk drop",
+  "Euphoric Hard trance breakdown into hard kick",
   "Scouse house stomper with reverse bass",
-  "Tech-trance driving rhythm 150bpm"
+  "UK Hard House driving rhythm 150bpm"
 ];
 
 // --- UTILS ---
