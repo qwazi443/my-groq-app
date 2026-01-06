@@ -12,12 +12,12 @@ const INSTRUMENT_PRESETS = [
   { id: 'kick', name: 'Kick', icon: Drum, pitch: 'C2', file: 'kick1.wav' },
   { id: 'clap', name: 'Clap', icon: Music, pitch: 'D#2', file: 'clap1.wav' },
   { id: 'snare', name: 'Snare', icon: Speaker, pitch: 'D2', file: 'snare1.wav' },
-  { id: 'hat_open', name: 'Open Hat', icon: Cymbal, pitch: 'F#2', file: 'hat_open1.wav' },
-  { id: 'hat_closed', name: 'Closed Hat', icon: Cymbal, pitch: 'G#2', file: 'hat_closed1.wav' },
-  { id: 'bass', name: 'Bass', icon: Bass, pitch: 'D3', file: 'bass1.wav' }, 
+  { id: 'hat_open', name: 'Open Hat', icon: Volume2, pitch: 'F#2', file: 'hat_open1.wav' },
+  { id: 'hat_closed', name: 'Closed Hat', icon: Disc, pitch: 'G#2', file: 'hat_closed1.wav' },
+  { id: 'bass', name: 'Bass', icon: Activity, pitch: 'D3', file: 'bass1.wav' }, 
   { id: 'lead', name: 'Lead', icon: Zap, pitch: 'C4', file: 'lead1.wav' },
-  { id: 'stabs', name: 'Stabs', icon: lightning, pitch: 'C3', file: 'stabs1.wav' },
-  { id: 'hoover', name: 'Hoover', icon: Vaccum, pitch: 'F3', file: 'hoover1.wav' },
+  { id: 'stabs', name: 'Stabs', icon: Activity, pitch: 'C3', file: 'stabs1.wav' },
+  { id: 'hoover', name: 'Hoover', icon: Disc, pitch: 'F3', file: 'hoover1.wav' },
 ];
 
 const RHYTHM_LIB = {
@@ -136,6 +136,11 @@ class AudioEngine {
     this.masterGain.connect(this.analyser);
 
     this.buffers = {};
+    
+    // MONOPHONIC TRACKERS (Prevent overlap echo)
+    this.activeBassNode = null;
+    this.activeLeadNode = null;
+    
     this.onStatusUpdate = onStatusUpdate || console.log;
   }
 
@@ -167,6 +172,11 @@ class AudioEngine {
   }
 
   playNote(instId, pitch, time, duration, velocity = 100) {
+    // 1. MONOPHONIC CUTOFF (The Anti-Echo Fix)
+    if (instId === 'bass' && this.activeBassNode) {
+        try { this.activeBassNode.stop(time); } catch(e){}
+    }
+    
     if (this.buffers[instId]) {
       this.playSample(instId, time, velocity);
     } else {
@@ -178,9 +188,15 @@ class AudioEngine {
     const source = this.ctx.createBufferSource();
     source.buffer = this.buffers[id];
     
+    // TRACK THE BASS
+    if (id === 'bass') this.activeBassNode = source;
+
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(velocity / 127, time);
-    gain.gain.exponentialRampToValueAtTime(0.01, time + source.buffer.duration);
+    
+    // Shorten the tail for bass to prevent muddy mix
+    const tail = id === 'bass' ? 0.3 : source.buffer.duration;
+    gain.gain.exponentialRampToValueAtTime(0.01, time + tail);
 
     source.connect(gain);
     gain.connect(this.masterGain);
@@ -215,6 +231,9 @@ class AudioEngine {
     const midi = noteToMidiNum(pitch);
     const freq = 440 * Math.pow(2, (midi - 69) / 12);
     osc.frequency.setValueAtTime(freq, time);
+    
+    // TRACK THE SYNTH BASS TOO
+    this.activeBassNode = osc;
     
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
@@ -279,11 +298,9 @@ export default function HardHouseGenerator() {
   const [errorMsg, setErrorMsg] = useState('');
   const [audioStatus, setAudioStatus] = useState('Initializing...');
 
-  // --- THE MASTER SWITCH (Prevents Echo) ---
   const isPlayingRef = useRef(false);
   const canvasRef = useRef(null);
 
-  // --- GLOBAL INIT ---
   useEffect(() => {
     if (!window.HARDHOUSE_AUDIO) {
       window.HARDHOUSE_AUDIO = new AudioEngine((status) => setAudioStatus(status));
@@ -293,7 +310,6 @@ export default function HardHouseGenerator() {
     }
   }, []);
 
-  // Visualizer Loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !window.HARDHOUSE_AUDIO) return;
@@ -327,9 +343,7 @@ export default function HardHouseGenerator() {
     return () => cancelAnimationFrame(animationId);
   }, [isPlaying]);
 
-  // --- RECURSIVE LOOP (GUARDED) ---
   const scheduleLoop = useCallback((notes) => {
-    // 1. THE KILL SWITCH: If this is false, STOP IMMEDIATELY.
     if (!isPlayingRef.current) return;
 
     if (!window.HARDHOUSE_AUDIO || !window.HARDHOUSE_AUDIO.ctx) return;
@@ -349,14 +363,11 @@ export default function HardHouseGenerator() {
     setTimeout(() => scheduleLoop(notes), (16 * step) * 1000);
   }, [bpm]);
 
-  // --- STOP LOGIC ---
   const stopPlayback = useCallback(() => {
-    // Flip the switch immediately
     isPlayingRef.current = false;
     setIsPlaying(false);
   }, []);
 
-  // --- CHAOS MODE ---
   const generateLocalPattern = () => {
     const notes = [];
     const leadBase = pickRandom(MELODY_LIB);
@@ -388,17 +399,14 @@ export default function HardHouseGenerator() {
   };
 
   const handleLaunch = async () => {
-    // TOGGLE OFF
     if (isPlaying) { 
       stopPlayback(); 
       return; 
     }
 
-    // TOGGLE ON
     if (!window.HARDHOUSE_AUDIO) return;
     await window.HARDHOUSE_AUDIO.resume();
 
-    // 1. FLIP THE MASTER SWITCH ON
     isPlayingRef.current = true;
     setErrorMsg('');
 
@@ -492,7 +500,7 @@ export default function HardHouseGenerator() {
           <div className="flex justify-center items-center gap-4 text-[#39FF14] font-bold tracking-[0.5em] text-xs uppercase">
             <span className="animate-flicker">Status: {audioStatus}</span>
             <div className={`h-2 w-2 rounded-full ${audioStatus === 'Ready' ? 'bg-[#39FF14]' : 'bg-red-500 animate-pulse'}`} />
-            <span>Ver 5.0 (Final)</span>
+            <span>Ver 5.1 (Fixed Bass)</span>
           </div>
         </header>
 
