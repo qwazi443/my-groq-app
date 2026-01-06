@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Download, Wand2, Zap, Disc, Music, Drum, Speaker, Volume2, Activity, AlertCircle, Play, Square, Info, Sliders, HelpCircle, X, Dice5, Volume1, Settings, Package } from 'lucide-react';
-import JSZip from 'jszip'; // NEW: Import Zip Library
+import { Download, Wand2, Zap, Disc, Music, Drum, Speaker, Volume2, Activity, AlertCircle, Play, Square, Info, Sliders, HelpCircle, X, Dice5, Volume1, Settings, Package, Check, AlertTriangle } from 'lucide-react';
+import JSZip from 'jszip'; 
 
 // --- CONSTANTS ---
 const KEYS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -17,9 +17,9 @@ const INSTRUMENT_PRESETS = [
   { id: 'hat_open', name: '909 Open', icon: Volume2, pitch: 'F#2', file: 'hat_open1.wav', desc: 'Offbeat Hi-Hat' },
   { id: 'hat_closed', name: '909 Closed', icon: Disc, pitch: 'G#2', file: 'hat_closed1.wav', desc: 'Driving 16th Hats' },
   { id: 'bass', name: 'Donk Bass', icon: Activity, pitch: 'D3', file: 'bass1.wav', desc: 'FM Donk / Offbeat Bass' }, 
-  { id: 'lead', name: 'Alpha Hoover', icon: Zap, pitch: 'C4', file: 'lead1.wav', desc: 'Massive Pitch-Ramp Saw (sample preferred)' },
-  { id: 'hoover', name: 'Acid Screech', icon: Disc, pitch: 'F3', file: 'hoover1.wav', desc: 'Distorted 303 Square (sample preferred)' },
-  { id: 'stabs', name: 'Rave Stabs', icon: Activity, pitch: 'C3', file: 'stabs1.wav', desc: 'Short punchy rave hits (sample preferred)' },
+  { id: 'lead', name: 'Alpha Hoover', icon: Zap, pitch: 'C4', file: 'lead1.wav', desc: 'Massive Pitch-Ramp Saw' },
+  { id: 'hoover', name: 'Acid Screech', icon: Disc, pitch: 'F3', file: 'hoover1.wav', desc: 'Distorted 303 Square' },
+  { id: 'stabs', name: 'Rave Stabs', icon: Activity, pitch: 'C3', file: 'stabs1.wav', desc: 'Retro Chord Hits' },
 ];
 
 const PROMPT_EXAMPLES = [
@@ -62,11 +62,11 @@ function writeMidiFile(notes) {
   notes.forEach(n => {
     const midiNote = noteToMidiNum(n.pitch);
     let channel = 0;
-    if (['kick', 'clap', 'snare', 'hat_open', 'hat_closed'].includes(n.instId)) channel = 9;
-    else if (n.instId === 'bass') channel = 1;
-    else if (n.instId === 'lead') channel = 0;
-    else if (n.instId === 'hoover') channel = 2;
-    else if (n.instId === 'stabs') channel = 3;
+    if (['kick', 'clap', 'snare', 'hat_open', 'hat_closed'].includes(n.instId)) channel = 9; 
+    else if (n.instId === 'bass') channel = 1; 
+    else if (n.instId === 'lead') channel = 0; 
+    else if (n.instId === 'hoover') channel = 2; 
+    else if (n.instId === 'stabs') channel = 3; 
     
     events.push({ type: 'on', tick: n.startTick, note: midiNote, velocity: n.velocity || 100, channel });
     const durationTicks = parseInt(n.duration || '2') * (128 / 4);
@@ -75,8 +75,8 @@ function writeMidiFile(notes) {
   events.sort((a, b) => a.tick - b.tick);
 
   const data = [
-    0x4d, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06, 0x00, 0x01, 0x00, 0x01, 0x00, 0x80,
-    0x4d, 0x54, 0x72, 0x6b
+    0x4d, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06, 0x00, 0x01, 0x00, 0x01, 0x00, 0x80, 
+    0x4d, 0x54, 0x72, 0x6b 
   ];
   
   const trackData = [];
@@ -108,21 +108,21 @@ function writeMidiFile(notes) {
   return new Uint8Array(data);
 }
 
-// --- DISTORTION CURVE ---
-function makeDistortionCurve(amount = 50) {
+function makeDistortionCurve(amount) {
+  const k = typeof amount === 'number' ? amount : 50;
   const n_samples = 44100;
   const curve = new Float32Array(n_samples);
   const deg = Math.PI / 180;
   for (let i = 0; i < n_samples; ++i) {
     const x = (i * 2) / n_samples - 1;
-    curve[i] = (3 + amount) * x * 20 * deg / (Math.PI + amount * Math.abs(x));
+    curve[i] = (3 + k) * x * 20 * deg / (Math.PI + k * Math.abs(x));
   }
   return curve;
 }
 
-// --- UK HARD HOUSE AUDIO ENGINE (Updated Version) ---
+// --- UK HARD HOUSE AUDIO ENGINE (V16.0 - PATHFINDER) ---
 class AudioEngine {
-  constructor(onStatusUpdate) {
+  constructor(onStatusUpdate, onSampleLoad) {
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 0.5;
@@ -147,10 +147,13 @@ class AudioEngine {
     this.activeNodes = []; 
     
     this.onStatusUpdate = onStatusUpdate || console.log;
+    this.onSampleLoad = onSampleLoad || console.log;
   }
 
   async resume() {
-    if (this.ctx.state === 'suspended') await this.ctx.resume();
+    if (this.ctx.state === 'suspended') {
+      await this.ctx.resume();
+    }
   }
 
   kill() {
@@ -159,35 +162,63 @@ class AudioEngine {
     this.masterGain.gain.setValueAtTime(0, now);
     this.masterGain.gain.linearRampToValueAtTime(0.5, now + 0.1); 
     
-    this.activeNodes.forEach(n => { try { n.stop(now); } catch {} });
+    this.activeNodes.forEach(n => { try{n.stop();}catch(e){} });
     this.activeNodes = [];
   }
 
   async loadBank(presets) {
     const promises = presets.map(async (inst) => {
       if (!inst.file) return;
-      const path = `/samples/${inst.file}`;
-      try {
-        const response = await fetch(path);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const arrayBuffer = await response.arrayBuffer();
-        const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
-        this.buffers[inst.id] = audioBuffer;
-        console.log(`Loaded sample: ${inst.id}`);
-      } catch (e) {
-        console.warn(`❌ FAILED to load ${path}: ${e.message}`);
-        if (this.onStatusUpdate) this.onStatusUpdate(`Sample load failed: ${inst.id} – using synth`);
+      
+      // SMART PATH LOADER: Try multiple locations
+      const possiblePaths = [
+          `/samples/${inst.file}`,  // Standard Public
+          `/${inst.file}`,          // Root Public
+          `./samples/${inst.file}`, // Relative
+          inst.file                 // Direct
+      ];
+
+      let loaded = false;
+      for (const path of possiblePaths) {
+          if (loaded) break;
+          try {
+            const response = await fetch(path);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            
+            // Check if we got an HTML error page instead of audio
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.includes("text/html")) throw new Error("Not Audio");
+
+            const arrayBuffer = await response.arrayBuffer();
+            const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
+            this.buffers[inst.id] = audioBuffer;
+            loaded = true;
+            this.onSampleLoad(inst.id, true, path);
+          } catch (e) {
+            // Continue to next path
+          }
+      }
+      
+      if (!loaded) {
+          this.onSampleLoad(inst.id, false, "All paths failed");
       }
     });
     await Promise.all(promises);
-    if (this.onStatusUpdate) this.onStatusUpdate('Ready');
+    if(this.onStatusUpdate) this.onStatusUpdate('Ready');
   }
 
   playNote(instId, pitch, time, duration, velocity = 100) {
-    // Samples preferred for lead/hoover/stabs — no forced synth override
+    // 1. FORCE SYNTH FOR LEAD & HOOVER
+    if (instId === 'lead' || instId === 'hoover') {
+       this.playSynth(instId, pitch, time, duration, velocity);
+       return; 
+    }
+    
+    // 2. CHECK FOR SAMPLE
     if (this.buffers[instId]) {
       this.playSample(instId, time, velocity);
     } else {
+      // 3. FALLBACK TO SYNTH
       this.playSynth(instId, pitch, time, duration, velocity);
     }
   }
@@ -195,13 +226,7 @@ class AudioEngine {
   preview(instId) {
     this.resume();
     const now = this.ctx.currentTime;
-    const pitchMap = {
-      'bass': 'D3',
-      'lead': 'C4',
-      'hoover': 'F3',
-      'stabs': 'C3'
-    };
-    const pitch = pitchMap[instId] || 'C3';
+    const pitch = instId === 'bass' ? 'D3' : instId === 'lead' ? 'C4' : 'C3';
     this.playNote(instId, pitch, now, '1', 100);
   }
 
@@ -212,8 +237,9 @@ class AudioEngine {
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(velocity / 127, time);
     
-    let tail = source.buffer?.duration || 0.3;
-    if (['bass', 'kick'].includes(id)) tail = 0.25;
+    let tail = source.buffer.duration;
+    if (id === 'bass') tail = 0.25; 
+    if (id === 'kick') tail = 0.3;  
     
     gain.gain.exponentialRampToValueAtTime(0.01, time + tail);
 
@@ -222,7 +248,7 @@ class AudioEngine {
     source.start(time);
     
     this.activeNodes.push(source);
-    if (this.activeNodes.length > 40) this.activeNodes.shift();
+    if(this.activeNodes.length > 40) this.activeNodes.shift();
   }
 
   playSynth(instId, pitch, time, duration, velocity) {
@@ -234,6 +260,8 @@ class AudioEngine {
     else if (instId === 'hoover') this.synthAcidScreech(pitch, time, duration, vel); 
     else this.synthHat(time, instId.includes('open'), vel);
   }
+
+  // --- SYNTH MODELS ---
 
   synthKick(time, vel) {
     const osc = this.ctx.createOscillator();
@@ -266,47 +294,28 @@ class AudioEngine {
   
   synthMassiveHoover(pitch, time, dur, vel) {
     const targetFreq = 440 * Math.pow(2, (noteToMidiNum(pitch) - 69) / 12);
-    const attack = 0.45; // slower ramp for classic hoover "suck"
-
-    const createLayer = (detune, pan, type = 'sawtooth', freqMult = 1, extraGain = 1) => {
-      const osc = this.ctx.createOscillator();
-      osc.type = type;
-      osc.frequency.setValueAtTime(targetFreq * 0.18 * freqMult, time); // start very low
-      osc.frequency.exponentialRampToValueAtTime(targetFreq * freqMult, time + attack);
-      osc.detune.setValueAtTime(detune, time);
-
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(400, time);
-      filter.frequency.exponentialRampToValueAtTime(14000, time + attack * 1.2);
-      filter.Q.value = 9; // high resonance for bite
-
-      const panner = this.ctx.createStereoPanner();
-      panner.pan.value = pan;
-
-      const g = this.ctx.createGain();
-      g.gain.setValueAtTime(vel * 0.18 * extraGain, time);
-      g.gain.linearRampToValueAtTime(0.001, time + dur + 0.2);
-
-      const shaper = this.ctx.createWaveShaper();
-      shaper.curve = this.distCurve;
-      shaper.oversample = '4x';
-
-      osc.connect(filter).connect(shaper).connect(panner).connect(g).connect(this.masterGain);
-      osc.start(time); osc.stop(time + dur + 0.3);
-
-      this.activeNodes.push(osc);
+    const attack = 0.15; 
+    const createOsc = (detune, pan, type = 'sawtooth', octShift = 0) => {
+        const osc = this.ctx.createOscillator();
+        osc.type = type;
+        osc.frequency.setValueAtTime(targetFreq * 0.5, time); 
+        osc.frequency.exponentialRampToValueAtTime(targetFreq * (octShift === -1 ? 0.5 : 1), time + attack);
+        osc.detune.setValueAtTime(detune, time);
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(800, time);
+        filter.frequency.exponentialRampToValueAtTime(12000, time + attack); 
+        filter.Q.value = 1;
+        const panner = this.ctx.createStereoPanner();
+        panner.pan.value = pan;
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(vel * 0.25, time); 
+        g.gain.linearRampToValueAtTime(0, time + dur); 
+        osc.connect(filter).connect(panner).connect(g).connect(this.masterGain);
+        osc.start(time); osc.stop(time + dur);
+        this.activeNodes.push(osc);
     };
-
-    // 7 layers + sub for thickness (Juno-style detune swarm)
-    createLayer(0,    0,    'sawtooth', 1, 1.4);
-    createLayer(-18,  -0.5, 'sawtooth');
-    createLayer(18,   0.5,  'sawtooth');
-    createLayer(-35,  -0.7, 'sawtooth');
-    createLayer(35,   0.7,  'sawtooth');
-    createLayer(-8,   -0.3, 'sawtooth');
-    createLayer(8,    0.3,  'sawtooth');
-    createLayer(0,    0,    'square',   0.5, 0.6); // sub-octave square for body
+    createOsc(0, 0); createOsc(-25, -0.6); createOsc(25, 0.6); createOsc(-10, -0.3); createOsc(10, 0.3); createOsc(0, 0, 'square', -1);
   }
 
   synthAcidScreech(pitch, time, dur, vel) {
@@ -379,18 +388,31 @@ const Knob = ({ label, value, onChange, options, help }) => (
   </div>
 );
 
-const HelpModal = ({ onClose }) => (
+const HelpModal = ({ onClose, sampleStatus }) => (
   <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <div className="bg-[#111] border-2 border-[#39FF14] rounded-2xl max-w-lg w-full p-6 relative shadow-[0_0_50px_rgba(57,255,20,0.2)] animate-in fade-in zoom-in duration-200">
       <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white" aria-label="Close Modal"><X size={24} /></button>
-      <h2 id="modal-title" className="text-2xl font-black text-[#39FF14] mb-4 uppercase">User Guide</h2>
-      <div className="space-y-4 text-gray-300 text-sm">
-        <p><strong className="text-white">1. Select Instruments:</strong> Use the matrix below. Toggle sounds on/off. Click the tiny <Play size={10} className="inline"/> button to preview.</p>
-        <p><strong className="text-white">2. Set Density:</strong> Use the Density slider to control how busy the pattern is (Minimal vs. Chaotic).</p>
-        <p><strong className="text-white">3. Generate:</strong> Click "GENERATE DROP" to create a unique, algorithmic pattern.</p>
-        <p><strong className="text-white">4. Export:</strong> "Export MIDI Zip" downloads a .zip file containing the full pattern AND individual instrument stems.</p>
+      <h2 id="modal-title" className="text-2xl font-black text-[#39FF14] mb-4 uppercase">Asset Status</h2>
+      
+      {/* ASSET CHECKER */}
+      <div className="grid grid-cols-2 gap-2 mb-6 text-xs font-mono border border-white/10 p-4 rounded bg-black/50">
+        {Object.entries(sampleStatus).map(([id, status]) => (
+            <div key={id} className="flex items-center justify-between">
+                <span className="uppercase text-gray-400">{id}</span>
+                {status ? 
+                    <span className="text-green-500 flex items-center gap-1"><Check size={10}/> OK</span> : 
+                    <span className="text-red-500 flex items-center gap-1"><AlertTriangle size={10}/> FAIL</span>
+                }
+            </div>
+        ))}
+        {Object.keys(sampleStatus).length === 0 && <div className="col-span-2 text-center text-gray-500">Loading assets...</div>}
       </div>
-      <button onClick={onClose} className="w-full mt-6 bg-[#39FF14] text-black font-bold py-3 rounded hover:opacity-90">GOT IT</button>
+
+      <div className="space-y-4 text-gray-300 text-sm">
+        <p><strong className="text-white">Note:</strong> If assets FAIL, the engine will use high-quality Synthesizers automatically.</p>
+        <p><strong className="text-white">To Fix:</strong> Ensure .wav files are in the <code className="bg-white/10 px-1 rounded">public/samples</code> folder.</p>
+      </div>
+      <button onClick={onClose} className="w-full mt-6 bg-[#39FF14] text-black font-bold py-3 rounded hover:opacity-90">START PRODUCING</button>
     </div>
   </div>
 );
@@ -410,13 +432,19 @@ export default function HardHouseGenerator() {
   const [errorMsg, setErrorMsg] = useState('');
   const [audioStatus, setAudioStatus] = useState('Init...');
   const [showHelp, setShowHelp] = useState(true);
+  
+  // Track sample loading state
+  const [sampleStatus, setSampleStatus] = useState({});
 
   const isPlayingRef = useRef(false);
   const canvasRef = useRef(null);
 
   useEffect(() => {
     if (!window.HARDHOUSE_AUDIO) {
-      window.HARDHOUSE_AUDIO = new AudioEngine((status) => setAudioStatus(status));
+      window.HARDHOUSE_AUDIO = new AudioEngine(
+          (status) => setAudioStatus(status),
+          (id, success) => setSampleStatus(prev => ({...prev, [id]: success}))
+      );
       window.HARDHOUSE_AUDIO.loadBank(INSTRUMENT_PRESETS);
     } else {
       setAudioStatus('Ready');
@@ -529,6 +557,12 @@ export default function HardHouseGenerator() {
          }
       }
 
+      if (instrumentsToUse.includes('stabs') && density > 0.6 && [0, 4, 8, 12].includes(step)) {
+         if(Math.random() > 0.7) {
+             notes.push({ instId: 'stabs', pitch: noteFromScale(selectedKey, selectedScale, 0, 3), duration: '2', velocity: getVel(90), startTick: step * 128 });
+         }
+      }
+
       if (instrumentsToUse.includes('hat_open') && step % 4 === 2) {
         notes.push({ instId: 'hat_open', pitch: 'F#2', duration: '2', velocity: getVel(100), startTick: step * 128 });
       }
@@ -577,11 +611,14 @@ export default function HardHouseGenerator() {
   const handleDownloadMidi = async () => {
     if (currentPattern.length === 0) return;
 
+    // ZIP Logic
     const zip = new JSZip();
 
+    // 1. Full Pattern
     const fullMidi = writeMidiFile(currentPattern);
     zip.file("full_pattern.mid", fullMidi);
 
+    // 2. Stems
     const stemsFolder = zip.folder("stems");
     selectedInstruments.forEach(instId => {
         const instNotes = currentPattern.filter(n => n.instId === instId);
@@ -591,6 +628,7 @@ export default function HardHouseGenerator() {
         }
     });
 
+    // 3. Download
     const content = await zip.generateAsync({ type: "blob" });
     const url = URL.createObjectURL(content);
     const a = document.createElement('a');
@@ -609,7 +647,7 @@ export default function HardHouseGenerator() {
 
   return (
     <main className="min-h-screen bg-[#050505] text-white font-sans selection:bg-[#39FF14] selection:text-black">
-      {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+      {showHelp && <HelpModal onClose={() => setShowHelp(false)} sampleStatus={sampleStatus} />}
       
       <div className="max-w-6xl mx-auto p-4 md:p-8 space-y-8">
         <header className="flex flex-col md:flex-row justify-between items-center gap-6 border-b border-white/10 pb-6">
@@ -622,7 +660,7 @@ export default function HardHouseGenerator() {
               <div className={`h-2 w-2 rounded-full ${audioStatus === 'Ready' ? 'bg-[#39FF14]' : 'bg-red-500 animate-pulse'}`} />
               <span>System: {audioStatus}</span>
               <span className="text-gray-500">|</span>
-              <span>v15.0 Zip Edition</span>
+              <span>v16.0 Pathfinder</span>
             </div>
           </div>
           <button 
@@ -630,7 +668,7 @@ export default function HardHouseGenerator() {
             className="flex items-center gap-2 bg-[#222] hover:bg-[#333] px-4 py-2 rounded-full border border-white/20 text-gray-200 text-sm font-bold transition-all hover:scale-105"
             aria-label="Open Help"
           >
-            <HelpCircle size={16} /> Guide
+            <HelpCircle size={16} /> Asset Status
           </button>
         </header>
 
