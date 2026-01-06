@@ -139,7 +139,8 @@ class AudioEngine {
     
     // MONOPHONIC TRACKERS (Prevent overlap echo)
     this.activeBassNode = null;
-    this.activeKickNode = null; // New Kick Tracker
+    this.activeKickNode = null; 
+    this.activeLeadNode = null; // Added Lead Tracker
     
     this.onStatusUpdate = onStatusUpdate || console.log;
   }
@@ -148,6 +149,22 @@ class AudioEngine {
     if (this.ctx.state === 'suspended') {
       await this.ctx.resume();
     }
+    // Fade in gently to prevent clicking
+    this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
+    this.masterGain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+  }
+
+  // --- THE HARD KILL SWITCH ---
+  kill() {
+    const now = this.ctx.currentTime;
+    // 1. Instantly mute master to prevent echo
+    this.masterGain.gain.cancelScheduledValues(now);
+    this.masterGain.gain.setValueAtTime(0, now);
+    
+    // 2. Kill monophonic nodes manually
+    if (this.activeBassNode) { try{this.activeBassNode.stop();}catch(e){} this.activeBassNode = null; }
+    if (this.activeKickNode) { try{this.activeKickNode.stop();}catch(e){} this.activeKickNode = null; }
+    if (this.activeLeadNode) { try{this.activeLeadNode.stop();}catch(e){} this.activeLeadNode = null; }
   }
 
   async loadBank(presets) {
@@ -173,13 +190,15 @@ class AudioEngine {
   }
 
   playNote(instId, pitch, time, duration, velocity = 100) {
-    // 1. MONOPHONIC BASS CUTOFF
+    // 1. MONOPHONIC CUTOFFS (Prevents echo/mud)
     if (instId === 'bass' && this.activeBassNode) {
         try { this.activeBassNode.stop(time); } catch(e){}
     }
-    // 2. MONOPHONIC KICK CUTOFF (Fixes Kick Echo)
     if (instId === 'kick' && this.activeKickNode) {
         try { this.activeKickNode.stop(time); } catch(e){}
+    }
+    if (instId === 'lead' && this.activeLeadNode) {
+        try { this.activeLeadNode.stop(time); } catch(e){}
     }
     
     if (this.buffers[instId]) {
@@ -193,17 +212,16 @@ class AudioEngine {
     const source = this.ctx.createBufferSource();
     source.buffer = this.buffers[id];
     
-    // TRACKERS
     if (id === 'bass') this.activeBassNode = source;
     if (id === 'kick') this.activeKickNode = source;
+    if (id === 'lead') this.activeLeadNode = source;
 
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(velocity / 127, time);
     
-    // Shorten tail for punchy drums
     let tail = source.buffer.duration;
     if (id === 'bass') tail = 0.3;
-    if (id === 'kick') tail = 0.25; // Tight kick tail
+    if (id === 'kick') tail = 0.25; 
     
     gain.gain.exponentialRampToValueAtTime(0.01, time + tail);
 
@@ -240,17 +258,13 @@ class AudioEngine {
     const midi = noteToMidiNum(pitch);
     const freq = 440 * Math.pow(2, (midi - 69) / 12);
     osc.frequency.setValueAtTime(freq, time);
-    
     this.activeBassNode = osc;
-    
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.setValueAtTime(freq * 3, time);
     filter.frequency.exponentialRampToValueAtTime(freq, time + 0.2);
-
     g.gain.setValueAtTime(vel, time);
     g.gain.exponentialRampToValueAtTime(0.01, time + dur); 
-    
     osc.connect(filter).connect(g).connect(this.masterGain);
     osc.start(time); osc.stop(time + dur);
   }
@@ -261,6 +275,9 @@ class AudioEngine {
     osc.type = 'square';
     const freq = 440 * Math.pow(2, (noteToMidiNum(pitch) - 69) / 12);
     osc.frequency.setValueAtTime(freq, time);
+    
+    this.activeLeadNode = osc; // TRACK LEAD
+
     g.gain.setValueAtTime(vel * 0.4, time);
     g.gain.linearRampToValueAtTime(0, time + dur);
     osc.connect(g).connect(this.masterGain);
@@ -374,6 +391,8 @@ export default function HardHouseGenerator() {
   const stopPlayback = useCallback(() => {
     isPlayingRef.current = false;
     setIsPlaying(false);
+    // CALL THE KILL SWITCH
+    if (window.HARDHOUSE_AUDIO) window.HARDHOUSE_AUDIO.kill();
   }, []);
 
   const generateLocalPattern = () => {
@@ -421,11 +440,15 @@ export default function HardHouseGenerator() {
     if (prompt.trim()) {
       setIsGenerating(true);
       try {
+        // INJECT VARIATION SEED SO AI IS DIFFERENT EVERY TIME
+        const randomSeed = Math.floor(Math.random() * 9999);
+        const variedPrompt = `${prompt} (Seed: ${randomSeed}). Make it dynamic with varying velocities.`;
+
         const response = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
-            prompt, 
+            prompt: variedPrompt, 
             instruments: selectedInstruments, 
             key: selectedKey, 
             scale: selectedScale, 
@@ -508,7 +531,7 @@ export default function HardHouseGenerator() {
           <div className="flex justify-center items-center gap-4 text-[#39FF14] font-bold tracking-[0.5em] text-xs uppercase">
             <span className="animate-flicker">Status: {audioStatus}</span>
             <div className={`h-2 w-2 rounded-full ${audioStatus === 'Ready' ? 'bg-[#39FF14]' : 'bg-red-500 animate-pulse'}`} />
-            <span>Ver 5.2 (Fixed Kick & Clap)</span>
+            <span>Ver 6.0 (Pro Audio)</span>
           </div>
         </header>
 
