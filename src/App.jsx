@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Download, Wand2, Zap, Disc, Music, Speaker, Volume2, Activity, AlertCircle, Play, Square, Info, Sliders, HelpCircle, X, Dice5, Volume1, Package, ToggleLeft, ToggleRight, FileAudio, AlertTriangle } from 'lucide-react';
+import { Download, Wand2, Zap, Disc, Music, Speaker, Volume2, Activity, AlertCircle, Play, Square, Info, Sliders, HelpCircle, X, Dice5, Volume1, Package, ToggleLeft, ToggleRight, FileAudio, AlertTriangle, ExternalLink } from 'lucide-react';
 import JSZip from 'jszip'; 
 
 // --- ERROR BOUNDARY ---
@@ -31,15 +31,16 @@ const SCALES = ['Minor', 'Phrygian', 'Dorian', 'Major', 'Harmonic Minor'];
 const PRODUCER_STYLES = ['Tidy Trax', 'Vicious Circle', 'Nukleuz', 'Paul Glazby', 'Andy Farley', 'Lisa Lashes', 'BK', 'Tony De Vit'];
 const DEFAULT_BPM = 150; 
 
+// Note: basePitch is crucial for calculating the shift. Assuming samples are tuned to C.
 const INSTRUMENT_PRESETS = [
-  { id: 'kick', name: '909 Kick', icon: Disc, pitch: 'C2', file: 'kick1.wav', desc: 'Punchy 909 Kick (On-beat)' },
-  { id: 'clap', name: 'Sharp Clap', icon: Music, pitch: 'D#2', file: 'clap1.wav', desc: 'Classic Handclap' },
-  { id: 'snare', name: 'Snare Roll', icon: Speaker, pitch: 'D2', file: 'snare1.wav', desc: 'Rapid Snare Fills' },
-  { id: 'hat_open', name: '909 Open', icon: Volume2, pitch: 'F#2', file: 'hat_open1.wav', desc: 'Offbeat Hi-Hat' },
-  { id: 'hat_closed', name: '909 Closed', icon: Disc, pitch: 'G#2', file: 'hat_closed1.wav', desc: 'Driving 16th Hats' },
-  { id: 'bass', name: 'Donk Bass', icon: Activity, pitch: 'D3', file: 'bass1.wav', desc: 'FM Donk / Offbeat Bass' }, 
-  { id: 'lead', name: 'Alpha Hoover', icon: Zap, pitch: 'C4', file: 'lead1.wav', desc: 'Massive Pitch-Ramp Saw' },
-  { id: 'hoover', name: 'Acid Screech', icon: Disc, pitch: 'F3', file: 'hoover1.wav', desc: 'Distorted 303 Square' },
+  { id: 'kick', name: '909 Kick', icon: Disc, pitch: 'C2', basePitch: 'C2', file: 'kick1.wav', desc: 'Punchy 909 Kick' },
+  { id: 'clap', name: 'Sharp Clap', icon: Music, pitch: 'D#2', basePitch: 'D#2', file: 'clap1.wav', desc: 'Classic Handclap' },
+  { id: 'snare', name: 'Snare Roll', icon: Speaker, pitch: 'D2', basePitch: 'D2', file: 'snare1.wav', desc: 'Rapid Snare Fills' },
+  { id: 'hat_open', name: '909 Open', icon: Volume2, pitch: 'F#2', basePitch: 'F#2', file: 'hat_open1.wav', desc: 'Offbeat Hi-Hat' },
+  { id: 'hat_closed', name: '909 Closed', icon: Disc, pitch: 'G#2', basePitch: 'G#2', file: 'hat_closed1.wav', desc: 'Driving 16th Hats' },
+  { id: 'bass', name: 'Donk Bass', icon: Activity, pitch: 'D3', basePitch: 'C2', file: 'bass1.wav', desc: 'FM Donk / Offbeat Bass' }, 
+  { id: 'lead', name: 'Alpha Hoover', icon: Zap, pitch: 'C4', basePitch: 'C4', file: 'lead1.wav', desc: 'Massive Pitch-Ramp Saw' },
+  { id: 'hoover', name: 'Acid Screech', icon: Disc, pitch: 'F3', basePitch: 'C3', file: 'hoover1.wav', desc: 'Distorted 303 Square' },
 ];
 
 const PROMPT_EXAMPLES = [
@@ -140,7 +141,7 @@ function makeDistortionCurve(amount) {
   return curve;
 }
 
-// --- UK HARD HOUSE AUDIO ENGINE (V20.0 - ANALOG FORCE) ---
+// --- AUDIO ENGINE (V22.0 - PITCH FIX) ---
 class AudioEngine {
   constructor(onStatusUpdate, onSampleStatus) {
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -160,6 +161,8 @@ class AudioEngine {
 
     this.buffers = {};
     this.activeNodes = []; 
+    // Store base pitches for calculation
+    this.basePitches = {};
     
     this.onStatusUpdate = onStatusUpdate || console.log;
     this.onSampleStatus = onSampleStatus || console.log;
@@ -187,7 +190,11 @@ class AudioEngine {
 
   async loadBank(presets) {
     const promises = presets.map(async (inst) => {
+      // Save base pitch for later math
+      this.basePitches[inst.id] = inst.basePitch || 'C3';
+
       if (!inst.file) return;
+      const ts = Date.now();
       const possiblePaths = [
           `/samples/${inst.file}`, 
           `/public/samples/${inst.file}`,
@@ -198,26 +205,29 @@ class AudioEngine {
       let loaded = false;
       for (const path of possiblePaths) {
           if (loaded) break;
+          const fullPath = `${path}?t=${ts}`;
           try {
-            this.onSampleStatus(inst.id, 'loading');
-            const response = await fetch(path);
+            this.onSampleStatus(inst.id, { status: 'loading', url: fullPath });
+            const response = await fetch(fullPath);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            
             const type = response.headers.get("content-type");
             if (type && type.includes("text/html")) throw new Error("HTML (404)");
+
             const arrayBuffer = await response.arrayBuffer();
             if (arrayBuffer.byteLength < 1000) throw new Error("Too small"); 
 
             const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
             this.buffers[inst.id] = audioBuffer;
             loaded = true;
-            this.onSampleStatus(inst.id, 'success');
+            this.onSampleStatus(inst.id, { status: 'success', url: path });
           } catch (e) {
             // Try next
           }
       }
       
       if (!loaded) {
-          this.onSampleStatus(inst.id, 'error');
+          this.onSampleStatus(inst.id, { status: 'error', url: 'ALL FAILED' });
       }
     });
     await Promise.all(promises);
@@ -225,20 +235,15 @@ class AudioEngine {
   }
 
   playNote(instId, pitch, time, duration, velocity = 100) {
-    // 1. FORCE SYNTH FOR LEAD & HOOVER (Fixes 8-bit sound)
-    // These instruments require dynamic pitch envelopes that samples cannot provide.
-    // We IGNORE the 'allowSynths' toggle for these because they are Primary Engines.
-    if (instId === 'lead' || instId === 'hoover') {
-       this.playSynth(instId, pitch, time, duration, velocity, true); // True = Force
-       return; 
-    }
-    
-    // 2. CHECK FOR SAMPLE
+    // 1. PLAY SAMPLE IF AVAILABLE
     if (this.buffers[instId]) {
-      this.playSample(instId, time, velocity);
-    } else {
-      // 3. FALLBACK TO SYNTH (Respects Toggle)
-      this.playSynth(instId, pitch, time, duration, velocity, false);
+      this.playSample(instId, pitch, time, velocity); // PASS PITCH NOW!
+      return;
+    }
+
+    // 2. FALLBACK TO SYNTH
+    if (this.allowSynths) {
+      this.playSynth(instId, pitch, time, duration, velocity);
     }
   }
 
@@ -249,26 +254,49 @@ class AudioEngine {
     this.playNote(instId, pitch, now, '1', 100);
   }
 
-  playSample(id, time, velocity) {
+  playSample(id, targetPitchStr, time, velocity) {
     const source = this.ctx.createBufferSource();
     source.buffer = this.buffers[id];
+    
+    // --- PITCH SHIFTING LOGIC ---
+    // 1. Get MIDI numbers
+    const targetMidi = noteToMidiNum(targetPitchStr);
+    const baseMidi = noteToMidiNum(this.basePitches[id] || 'C3');
+    
+    // 2. Calculate semitone difference
+    const semitoneDiff = targetMidi - baseMidi;
+    
+    // 3. Convert to playback rate: rate = 2 ^ (semitones / 12)
+    // Example: +12 semitones = 2.0 speed (1 octave up)
+    const playbackRate = Math.pow(2, semitoneDiff / 12);
+    
+    // 4. Apply
+    source.playbackRate.value = playbackRate;
+    // ---------------------------
+
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(velocity / 127, time);
-    let tail = source.buffer.duration;
-    if (id === 'bass') tail = 0.25; 
-    if (id === 'kick') tail = 0.3;  
-    gain.gain.exponentialRampToValueAtTime(0.01, time + tail);
+    
+    // Adjust tail length based on speed (faster sample = shorter time)
+    let duration = source.buffer.duration / playbackRate;
+    
+    // Force short decay for bass/kick to keep it tight
+    if (id === 'bass' || id === 'kick') {
+        gain.gain.exponentialRampToValueAtTime(0.01, time + (duration * 0.8));
+    } else {
+        gain.gain.exponentialRampToValueAtTime(0.01, time + duration);
+    }
+
     source.connect(gain);
     gain.connect(this.masterGain);
     source.start(time);
+    
     this.activeNodes.push(source);
     if(this.activeNodes.length > 40) this.activeNodes.shift();
   }
 
-  playSynth(instId, pitch, time, duration, velocity, force = false) {
-    // If not forced (fallback) and synths disabled, exit
-    if (!force && !this.allowSynths) return;
-
+  playSynth(instId, pitch, time, duration, velocity) {
+    if (!this.allowSynths) return;
     const vel = velocity / 127;
     if (instId === 'kick') this.synthKick(time, vel);
     else if (instId === 'bass') this.synthDonk(pitch, time, duration, vel); 
@@ -307,46 +335,29 @@ class AudioEngine {
   }
   
   synthMassiveHoover(pitch, time, dur, vel) {
-    // UPDATED HOOVER: Heavier detune, thicker sound
     const targetFreq = 440 * Math.pow(2, (noteToMidiNum(pitch) - 69) / 12);
     const attack = 0.15; 
-    
     const createOsc = (detune, pan, type = 'sawtooth', octShift = 0) => {
         const osc = this.ctx.createOscillator();
         osc.type = type;
-        
-        // Pitch Envelope (The Vacuum)
         osc.frequency.setValueAtTime(targetFreq * 0.5, time); 
         osc.frequency.exponentialRampToValueAtTime(targetFreq * (octShift === -1 ? 0.5 : 1), time + attack);
         osc.detune.setValueAtTime(detune, time);
-
-        // Filter (The Grit)
         const filter = this.ctx.createBiquadFilter();
         filter.type = 'lowpass';
         filter.frequency.setValueAtTime(800, time);
         filter.frequency.exponentialRampToValueAtTime(12000, time + attack); 
         filter.Q.value = 1;
-
         const panner = this.ctx.createStereoPanner();
         panner.pan.value = pan;
-
         const g = this.ctx.createGain();
-        // Increased volume for Lead
-        g.gain.setValueAtTime(vel * 0.3, time); 
+        g.gain.setValueAtTime(vel * 0.25, time); 
         g.gain.linearRampToValueAtTime(0, time + dur); 
-        
         osc.connect(filter).connect(panner).connect(g).connect(this.masterGain);
         osc.start(time); osc.stop(time + dur);
         this.activeNodes.push(osc);
     };
-
-    // 5-Stack Oscillator for Massiveness
-    createOsc(0, 0);     
-    createOsc(-25, -0.6);   
-    createOsc(25, 0.6);    
-    createOsc(-10, -0.3);   
-    createOsc(10, 0.3);    
-    createOsc(0, 0, 'square', -1); // Sub Bass
+    createOsc(0, 0); createOsc(-25, -0.6); createOsc(25, 0.6); createOsc(-10, -0.3); createOsc(10, 0.3); createOsc(0, 0, 'square', -1);
   }
 
   synthAcidScreech(pitch, time, dur, vel) {
@@ -354,22 +365,18 @@ class AudioEngine {
     const osc = this.ctx.createOscillator();
     osc.type = 'square'; 
     osc.frequency.setValueAtTime(freq, time);
-    
     const shaper = this.ctx.createWaveShaper();
     shaper.curve = this.distCurve;
     shaper.oversample = '4x';
-    
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.setValueAtTime(200, time);
-    filter.frequency.exponentialRampToValueAtTime(3500, time + 0.1); // Higher sweep
+    filter.frequency.exponentialRampToValueAtTime(2500, time + 0.1); 
     filter.frequency.exponentialRampToValueAtTime(freq, time + dur);
-    filter.Q.value = 20; // More Resonance
-    
+    filter.Q.value = 15; 
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(vel * 0.5, time);
     g.gain.exponentialRampToValueAtTime(0.01, time + dur);
-    
     osc.connect(filter).connect(shaper).connect(g).connect(this.masterGain);
     osc.start(time); osc.stop(time + dur);
     this.activeNodes.push(osc);
@@ -430,23 +437,27 @@ const HelpModal = ({ onClose, sampleStatus }) => (
   <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <div className="bg-[#111] border-2 border-[#39FF14] rounded-2xl max-w-lg w-full p-6 relative shadow-[0_0_50px_rgba(57,255,20,0.2)] animate-in fade-in zoom-in duration-200">
       <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white" aria-label="Close Modal"><X size={24} /></button>
-      <h2 id="modal-title" className="text-2xl font-black text-[#39FF14] mb-4 uppercase">Asset Status</h2>
+      <h2 id="modal-title" className="text-2xl font-black text-[#39FF14] mb-4 uppercase">Asset Debugger</h2>
       
-      <div className="grid grid-cols-2 gap-2 mb-6 text-xs font-mono border border-white/10 p-4 rounded bg-black/50">
-        {Object.entries(sampleStatus).map(([id, status]) => (
-            <div key={id} className="flex items-center justify-between border-b border-white/5 pb-1">
-                <span className="uppercase text-gray-400">{id}</span>
-                {status === 'success' && <span className="text-[#39FF14] flex items-center gap-1"><CheckIcon/> WAV OK</span>}
-                {status === 'error' && <span className="text-[#FF00FF] flex items-center gap-1"><AlertIcon/> SYNTH</span>}
-                {status === 'loading' && <span className="text-gray-500">...</span>}
+      <div className="grid grid-cols-1 gap-2 mb-6 text-xs font-mono border border-white/10 p-4 rounded bg-black/50 overflow-y-auto max-h-60">
+        {Object.entries(sampleStatus).map(([id, data]) => (
+            <div key={id} className="flex flex-col border-b border-white/5 pb-2 mb-2">
+                <div className="flex justify-between items-center">
+                    <span className="uppercase text-gray-400 font-bold">{id}</span>
+                    {data.status === 'success' && <span className="text-[#39FF14] flex items-center gap-1"><CheckIcon/> WAV OK</span>}
+                    {data.status === 'error' && <span className="text-[#FF00FF] flex items-center gap-1"><AlertIcon/> FAILED</span>}
+                    {data.status === 'loading' && <span className="text-gray-500">...</span>}
+                </div>
+                <a href={data.url} target="_blank" rel="noreferrer" className="text-[10px] text-blue-400 hover:underline truncate mt-1 flex items-center gap-1">
+                    {data.url} <ExternalLink size={10} />
+                </a>
             </div>
         ))}
       </div>
       <div className="space-y-4 text-gray-300 text-sm">
-        <p><strong className="text-white">SYNTH MODE:</strong> The .wav file failed to load. The engine is using a digital recreation.</p>
-        <p><strong className="text-white">WAV MODE:</strong> The original sample file is playing.</p>
+        <p><strong>Instructions:</strong> Click the blue links above. If they open a 404 page, your file is not in the <code className="bg-white/10 px-1 rounded">public/samples</code> folder.</p>
       </div>
-      <button onClick={onClose} className="w-full mt-6 bg-[#39FF14] text-black font-bold py-3 rounded hover:opacity-90">START PRODUCING</button>
+      <button onClick={onClose} className="w-full mt-6 bg-[#39FF14] text-black font-bold py-3 rounded hover:opacity-90">CLOSE</button>
     </div>
   </div>
 );
@@ -488,7 +499,6 @@ function HardHouseGenerator() {
       if (window.HARDHOUSE_AUDIO) window.HARDHOUSE_AUDIO.setAllowSynths(allowSynths);
   }, [allowSynths]);
 
-  // VISUALIZER
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !window.HARDHOUSE_AUDIO) return;
@@ -561,6 +571,9 @@ function HardHouseGenerator() {
       if (instrumentsToUse.includes('bass')) {
          if ([2, 6, 10, 14].includes(step)) {
             notes.push({ instId: 'bass', pitch: noteFromScale(selectedKey, selectedScale, 0, 2), duration: '2', velocity: getVel(115), startTick: step * 128 });
+         }
+         if (density > 0.6 && [3, 7, 11, 15].includes(step)) {
+             notes.push({ instId: 'bass', pitch: noteFromScale(selectedKey, selectedScale, 0, 2), duration: '1', velocity: getVel(90), startTick: step * 128 });
          }
       }
 
@@ -662,7 +675,7 @@ function HardHouseGenerator() {
             </h1>
             <div className="flex items-center gap-2 text-[#39FF14] font-mono text-xs uppercase mt-2">
               <div className={`h-2 w-2 rounded-full ${audioStatus === 'Ready' ? 'bg-[#39FF14]' : 'bg-red-500 animate-pulse'}`} />
-              <span>v20.0 Analog Force</span>
+              <span>v22.0 Pitch Perfect</span>
             </div>
           </div>
           <div className="flex gap-2">
@@ -670,6 +683,7 @@ function HardHouseGenerator() {
                 onClick={() => setAllowSynths(!allowSynths)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-bold transition-all ${allowSynths ? 'bg-[#FF00FF]/10 border-[#FF00FF] text-[#FF00FF]' : 'bg-gray-800 border-gray-600 text-gray-400'}`}
               >
+                {allowSynths ? <ToggleRight size={16}/> : <ToggleLeft size={16}/>}
                 {allowSynths ? 'Backup Synths: ON' : 'Backup Synths: OFF'}
               </button>
               <button onClick={() => setShowHelp(true)} className="flex items-center gap-2 bg-[#222] hover:bg-[#333] px-4 py-2 rounded-full border border-white/20 text-gray-200 text-sm font-bold">
@@ -680,6 +694,7 @@ function HardHouseGenerator() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <section className="lg:col-span-4 space-y-6">
+             {/* PRODUCER CONTROLS */}
              <div className="bg-[#0A0A0A] border border-white/10 rounded-xl p-6 relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-1 h-full bg-[#39FF14]" />
                 <div className="flex items-center gap-2 mb-6 text-gray-400 text-xs font-black uppercase tracking-widest">
@@ -753,7 +768,8 @@ function HardHouseGenerator() {
                 <div onClick={(e) => handlePreview(inst.id, e)} className="absolute top-2 right-2 p-1 bg-black/50 hover:bg-white text-white hover:text-black rounded-full z-10">
                     <Volume1 size={12} />
                 </div>
-                <div className={`absolute top-2 left-2 w-2 h-2 rounded-full ${sampleStatus[inst.id] === 'success' ? 'bg-[#39FF14]' : sampleStatus[inst.id] === 'error' ? 'bg-[#FF00FF]' : 'bg-gray-600'}`} />
+                {/* STATUS DOT */}
+                <div className={`absolute top-2 left-2 w-2 h-2 rounded-full ${sampleStatus[inst.id]?.status === 'success' ? 'bg-[#39FF14]' : sampleStatus[inst.id]?.status === 'error' ? 'bg-[#FF00FF]' : 'bg-gray-600'}`} />
                 <inst.icon size={24} />
                 <span className="text-[10px] font-bold uppercase tracking-widest">{inst.name}</span>
               </button>
