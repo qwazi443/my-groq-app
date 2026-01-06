@@ -16,8 +16,8 @@ const INSTRUMENT_PRESETS = [
   { id: 'hat_open', name: '909 Open', icon: Volume2, pitch: 'F#2', file: 'hat_open1.wav', desc: 'Offbeat Hi-Hat' },
   { id: 'hat_closed', name: '909 Closed', icon: Disc, pitch: 'G#2', file: 'hat_closed1.wav', desc: 'Driving 16th Hats' },
   { id: 'bass', name: 'Donk Bass', icon: Activity, pitch: 'D3', file: 'bass1.wav', desc: 'FM Donk / Offbeat Bass' }, 
-  { id: 'lead', name: 'Super Hoover', icon: Zap, pitch: 'C4', file: 'lead1.wav', desc: 'Massive Detuned Saw' },
-  { id: 'stabs', name: 'Rave Stabs', icon: Activity, pitch: 'C3', file: 'stabs1.wav', desc: 'Retro Chord Hits' },
+  { id: 'lead', name: 'Alpha Hoover', icon: Zap, pitch: 'C4', file: 'lead1.wav', desc: 'Massive Pitch-Ramp Saw' },
+  { id: 'hoover', name: 'Acid Screech', icon: Disc, pitch: 'F3', file: 'hoover1.wav', desc: 'Distorted 303 Square' }, // Renamed for clarity
 ];
 
 const PROMPT_EXAMPLES = [
@@ -104,15 +104,30 @@ function writeMidiFile(notes) {
   return new Uint8Array(data);
 }
 
-// --- AUDIO ENGINE ---
+// --- DISTORTION CURVE (The "Grit" Maker) ---
+function makeDistortionCurve(amount) {
+  const k = typeof amount === 'number' ? amount : 50;
+  const n_samples = 44100;
+  const curve = new Float32Array(n_samples);
+  const deg = Math.PI / 180;
+  for (let i = 0; i < n_samples; ++i) {
+    const x = (i * 2) / n_samples - 1;
+    curve[i] = (3 + k) * x * 20 * deg / (Math.PI + k * Math.abs(x));
+  }
+  return curve;
+}
+
+// --- UK HARD HOUSE AUDIO ENGINE (V13.0) ---
 class AudioEngine {
   constructor(onStatusUpdate) {
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 0.5;
     
+    // 1. LIMITER / COMPRESSOR (Prevents Clipping)
     this.compressor = this.ctx.createDynamicsCompressor();
-    this.compressor.threshold.value = -20;
+    this.compressor.threshold.value = -12;
+    this.compressor.knee.value = 30;
     this.compressor.ratio.value = 12;
     this.compressor.attack.value = 0.003;
     this.compressor.release.value = 0.25;
@@ -123,6 +138,9 @@ class AudioEngine {
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 2048;
     this.masterGain.connect(this.analyser);
+
+    // 2. GLOBAL DISTORTION CURVE (Pre-calculated)
+    this.distCurve = makeDistortionCurve(200); // Amount of grit
 
     this.buffers = {};
     this.activeNodes = []; 
@@ -165,8 +183,8 @@ class AudioEngine {
   }
 
   playNote(instId, pitch, time, duration, velocity = 100) {
-    // Lead/Hoover always uses synthesis for maximum control
-    if (instId === 'lead' || instId === 'hoover') {
+    // Lead/Hoover/Acid ALWAYS use synth engine (bypass sample)
+    if (instId === 'lead' || instId === 'hoover' || instId === 'stabs') {
        this.playSynth(instId, pitch, time, duration, velocity);
        return; 
     }
@@ -195,20 +213,23 @@ class AudioEngine {
     gain.connect(this.masterGain);
     source.start(time);
     
-    // Store for kill switch, filter out old nodes occasionally
     this.activeNodes.push(source);
-    if(this.activeNodes.length > 20) this.activeNodes.shift();
+    // Cleanup old nodes
+    if(this.activeNodes.length > 30) this.activeNodes.shift();
   }
 
   playSynth(instId, pitch, time, duration, velocity) {
     const vel = velocity / 127;
+    
     if (instId === 'kick') this.synthKick(time, vel);
     else if (instId === 'bass') this.synthDonk(pitch, time, duration, vel); 
-    else if (instId === 'lead') this.synthSuperHoover(pitch, time, duration, vel); 
+    else if (instId === 'lead') this.synthMassiveHoover(pitch, time, duration, vel); // NEW
+    else if (instId === 'hoover') this.synthAcidScreech(pitch, time, duration, vel); // NEW (Fixes "hat" bug)
     else this.synthHat(time, instId.includes('open'), vel);
   }
 
-  // --- SYNTH MODELS ---
+  // --- SYNTH MODELS (V13.0 - SONIC WARFARE EDITION) ---
+
   synthKick(time, vel) {
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
@@ -238,30 +259,76 @@ class AudioEngine {
     this.activeNodes.push(osc);
   }
   
-  synthSuperHoover(pitch, time, dur, vel) {
+  synthMassiveHoover(pitch, time, dur, vel) {
+    // THE "DOMINATOR" HOOVER (5 Oscillators + Pitch Ramp)
     const targetFreq = 440 * Math.pow(2, (noteToMidiNum(pitch) - 69) / 12);
     const attack = 0.15; 
-    const createOsc = (detune, pan) => {
+    
+    const createOsc = (detune, pan, type = 'sawtooth', octShift = 0) => {
         const osc = this.ctx.createOscillator();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(targetFreq * 0.25, time); 
-        osc.frequency.exponentialRampToValueAtTime(targetFreq, time + attack);
+        osc.type = type;
+        
+        // PITCH ENVELOPE (The Vacuum)
+        osc.frequency.setValueAtTime(targetFreq * 0.5, time); 
+        osc.frequency.exponentialRampToValueAtTime(targetFreq * (octShift === -1 ? 0.5 : 1), time + attack);
         osc.detune.setValueAtTime(detune, time);
+
+        // FILTER (Bite)
         const filter = this.ctx.createBiquadFilter();
         filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(500, time);
-        filter.frequency.exponentialRampToValueAtTime(8000, time + attack); 
-        filter.Q.value = 2;
+        filter.frequency.setValueAtTime(800, time);
+        filter.frequency.exponentialRampToValueAtTime(12000, time + attack); 
+        filter.Q.value = 1;
+
         const panner = this.ctx.createStereoPanner();
         panner.pan.value = pan;
+
         const g = this.ctx.createGain();
-        g.gain.setValueAtTime(vel * 0.4, time); 
+        g.gain.setValueAtTime(vel * 0.25, time); 
         g.gain.linearRampToValueAtTime(0, time + dur); 
+        
         osc.connect(filter).connect(panner).connect(g).connect(this.masterGain);
         osc.start(time); osc.stop(time + dur);
         this.activeNodes.push(osc);
     };
-    createOsc(0, 0); createOsc(-20, -0.5); createOsc(20, 0.5);   
+
+    createOsc(0, 0);     // Center
+    createOsc(-25, -0.6);   // Wide Left
+    createOsc(25, 0.6);    // Wide Right
+    createOsc(-10, -0.3);   // Mid Left
+    createOsc(10, 0.3);    // Mid Right
+    // SUB OSCILLATOR (Weight)
+    createOsc(0, 0, 'square', -1);
+  }
+
+  synthAcidScreech(pitch, time, dur, vel) {
+    // 303 STYLE ACID (Distorted Square + Resonant Filter)
+    const freq = 440 * Math.pow(2, (noteToMidiNum(pitch) - 69) / 12);
+    
+    const osc = this.ctx.createOscillator();
+    osc.type = 'square'; 
+    osc.frequency.setValueAtTime(freq, time);
+
+    // DISTORTION (The Grit)
+    const shaper = this.ctx.createWaveShaper();
+    shaper.curve = this.distCurve;
+    shaper.oversample = '4x';
+
+    // FILTER (The Squelch)
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(200, time);
+    filter.frequency.exponentialRampToValueAtTime(2500, time + 0.1); // Wah effect
+    filter.frequency.exponentialRampToValueAtTime(freq, time + dur);
+    filter.Q.value = 15; // HIGH RESONANCE
+
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(vel * 0.5, time);
+    g.gain.exponentialRampToValueAtTime(0.01, time + dur);
+    
+    osc.connect(filter).connect(shaper).connect(g).connect(this.masterGain);
+    osc.start(time); osc.stop(time + dur);
+    this.activeNodes.push(osc);
   }
 
   synthHat(time, isOpen, vel) {
@@ -416,7 +483,6 @@ export default function HardHouseGenerator() {
 
   const generateProceduralPattern = (instrumentsToUse) => {
     const notes = [];
-    // HUMANIZATION: Slight velocity variance
     const getVel = (base) => base + Math.floor(Math.random() * 20 - 10);
     
     for (let step = 0; step < 16; step++) {
@@ -430,9 +496,8 @@ export default function HardHouseGenerator() {
          notes.push({ instId: 'bass', pitch: noteFromScale(selectedKey, selectedScale, 0, 2), duration: '2', velocity: getVel(115), startTick: step * 128 });
       }
 
-      // 3. LEAD (Acid Rolls)
+      // 3. LEAD (Super Hoover)
       if (instrumentsToUse.includes('lead')) {
-        // Probabilities: Higher on weak beats
         const chance = [0, 4, 8, 12].includes(step) ? 0.2 : 0.8;
         if (Math.random() < chance) {
             const octaveJump = Math.random() > 0.7 ? 1 : 0;
@@ -440,14 +505,28 @@ export default function HardHouseGenerator() {
             notes.push({ 
                 instId: 'lead', 
                 pitch: noteFromScale(selectedKey, selectedScale, degree, 4 + octaveJump), 
-                duration: Math.random() > 0.5 ? '1' : '2', // Short/Long variance
+                duration: Math.random() > 0.5 ? '1' : '2', 
                 velocity: getVel(90), 
                 startTick: step * 128 
             });
         }
       }
 
-      // 4. HATS
+      // 4. ACID SCREECH (Hoover/Acid instrument)
+      if (instrumentsToUse.includes('hoover')) {
+         if (Math.random() < 0.3) {
+             const degree = [0, 5, 7][Math.floor(Math.random() * 3)];
+             notes.push({ 
+                 instId: 'hoover', 
+                 pitch: noteFromScale(selectedKey, selectedScale, degree, 3), 
+                 duration: '1', 
+                 velocity: getVel(100), 
+                 startTick: step * 128 
+             });
+         }
+      }
+
+      // 5. HATS
       if (instrumentsToUse.includes('hat_open') && step % 4 === 2) {
         notes.push({ instId: 'hat_open', pitch: 'F#2', duration: '2', velocity: getVel(100), startTick: step * 128 });
       }
@@ -466,14 +545,9 @@ export default function HardHouseGenerator() {
     isPlayingRef.current = true;
     setErrorMsg('');
 
-    // If no instruments selected, use all
     const instrumentsToUse = selectedInstruments.length > 0 ? selectedInstruments : INSTRUMENT_PRESETS.map(i => i.id);
 
-    // Default to Procedural (Offline Mode) since API key isn't user-configurable here
-    // But we simulate the "AI" feeling by using randomness seeds
     setIsGenerating(true);
-    
-    // Simulate "thinking" time for effect
     setTimeout(() => {
         try {
             const notes = generateProceduralPattern(instrumentsToUse);
@@ -489,7 +563,7 @@ export default function HardHouseGenerator() {
   };
 
   const handleRandomizePrompt = () => {
-    setPrompt(pickRandom(PROMPT_EXAMPLES));
+    setPrompt(PROMPT_EXAMPLES[Math.floor(Math.random() * PROMPT_EXAMPLES.length)]);
   };
 
   const handleDownloadMidi = () => {
@@ -516,8 +590,6 @@ export default function HardHouseGenerator() {
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
       
       <div className="max-w-6xl mx-auto p-4 md:p-8 space-y-8">
-        
-        {/* HEADER */}
         <header className="flex flex-col md:flex-row justify-between items-center gap-6 border-b border-white/10 pb-6">
           <div className="text-center md:text-left">
             <h1 className="text-5xl md:text-7xl font-black italic tracking-tighter uppercase">
@@ -528,7 +600,7 @@ export default function HardHouseGenerator() {
               <div className={`h-2 w-2 rounded-full ${audioStatus === 'Ready' ? 'bg-[#39FF14]' : 'bg-red-500 animate-pulse'}`} />
               <span>System: {audioStatus}</span>
               <span className="text-gray-500">|</span>
-              <span>v12.0 Production</span>
+              <span>v13.0 Sonic Warfare</span>
             </div>
           </div>
           <button 
@@ -541,8 +613,6 @@ export default function HardHouseGenerator() {
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          
-          {/* LEFT COLUMN */}
           <section className="lg:col-span-4 space-y-6" aria-label="Controls">
             <div className="bg-[#0A0A0A] border border-white/10 rounded-xl p-6 relative overflow-hidden">
               <div className="absolute top-0 left-0 w-1 h-full bg-[#39FF14]" />
@@ -563,13 +633,7 @@ export default function HardHouseGenerator() {
                 <div className="flex items-center gap-2 text-gray-400 text-xs font-black uppercase tracking-widest">
                   <Wand2 size={14} /> Pattern Prompt
                 </div>
-                <button 
-                    onClick={handleRandomizePrompt}
-                    className="text-gray-500 hover:text-[#FF00FF] transition-colors"
-                    aria-label="Randomize Prompt"
-                >
-                    <Dice5 size={16} />
-                </button>
+                <button onClick={handleRandomizePrompt} className="text-gray-500 hover:text-[#FF00FF] transition-colors" aria-label="Randomize Prompt"><Dice5 size={16} /></button>
               </div>
               <label htmlFor="promptInput" className="sr-only">Describe your pattern</label>
               <textarea 
@@ -582,14 +646,11 @@ export default function HardHouseGenerator() {
             </div>
           </section>
 
-          {/* RIGHT COLUMN */}
           <section className="lg:col-span-8 space-y-6" aria-label="Visualizer and Actions">
             <div className="bg-black border-2 border-white/10 rounded-2xl p-1 h-48 relative shadow-inner shadow-black">
               <canvas ref={canvasRef} width={800} height={200} className="w-full h-full rounded-xl opacity-90" aria-label="Audio Visualizer" role="img" />
               {!isPlaying && (
-                <div className="absolute inset-0 flex items-center justify-center text-gray-700 text-4xl font-black uppercase tracking-widest pointer-events-none select-none">
-                  Standby
-                </div>
+                <div className="absolute inset-0 flex items-center justify-center text-gray-700 text-4xl font-black uppercase tracking-widest pointer-events-none select-none">Standby</div>
               )}
             </div>
 
@@ -604,13 +665,7 @@ export default function HardHouseGenerator() {
                 }`}
                 aria-label={isPlaying ? "Stop Audio" : "Generate Drop"}
               >
-                {isGenerating ? (
-                  <span className="animate-pulse">Generating...</span>
-                ) : isPlaying ? (
-                  <><Square fill="currentColor" /> STOP AUDIO</>
-                ) : (
-                  <><Play fill="currentColor" /> GENERATE DROP</>
-                )}
+                {isGenerating ? <span className="animate-pulse">Generating...</span> : isPlaying ? <><Square fill="currentColor" /> STOP AUDIO</> : <><Play fill="currentColor" /> GENERATE DROP</>}
               </button>
 
               <button
@@ -627,7 +682,6 @@ export default function HardHouseGenerator() {
           </section>
         </div>
 
-        {/* INSTRUMENTS */}
         <section aria-label="Instrument Selection">
           <div className="flex items-center gap-2 mb-4 text-gray-400 text-xs font-black uppercase tracking-widest border-b border-white/10 pb-2">
             <Music size={14} /> Instrument Matrix
@@ -647,14 +701,11 @@ export default function HardHouseGenerator() {
               >
                 <inst.icon size={20} aria-hidden="true" />
                 <span className="text-[10px] font-bold uppercase tracking-widest">{inst.name}</span>
-                {selectedInstruments.includes(inst.id) && (
-                  <div className="absolute bottom-0 left-0 w-full h-1 bg-[#39FF14]" />
-                )}
+                {selectedInstruments.includes(inst.id) && <div className="absolute bottom-0 left-0 w-full h-1 bg-[#39FF14]" />}
               </button>
             ))}
           </div>
         </section>
-
       </div>
     </main>
   );
